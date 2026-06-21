@@ -1,0 +1,90 @@
+---
+description: Mandatory FastAPI backend conventions for API development, validation, security, and project structure
+globs: **/*.py
+alwaysApply: false
+---
+
+# FastAPI Project Rules (Enforced)
+
+These are **mandatory** conventions for the FastAPI backend. Do not deviate unless explicitly instructed.
+
+For frontend integration patterns, see [api-contract.mdc](mdc:.cursor/rules/api-contract.mdc).
+For database schema conventions, see [postgres.mdc](mdc:.cursor/rules/postgres.mdc).
+
+---
+
+## 1. Validation & Schemas
+
+- **Always use Pydantic v2** for all request/response validation — route inputs, query params, and response models.
+- **Shared schemas:** Define Pydantic models in `app/schemas/` and reuse across routes. Never define schemas inline in route handlers.
+- **ORM mapping:** Use `model_config = ConfigDict(from_attributes=True)` on schemas that map from SQLAlchemy models.
+- **Separate concerns:** Keep `Create`, `Update`, `Read`, and `InDB` schema variants distinct. Do not reuse a single schema for all operations.
+
+---
+
+## 2. API Design
+
+- **RESTful naming:** Use plural nouns under a versioned prefix — `/api/v1/receipts`, `/api/v1/receipts/{id}`.
+- **Consistent response envelope:** Always return `{ "data": ..., "error": null }` on success or `{ "data": null, "error": { "code": "...", "message": "..." } }` on failure.
+- **HTTP status codes:** Use correct codes — `201` for creation, `204` for deletion, `404` for not found, `422` for validation errors.
+- **Dependency injection:** Use `Depends()` for DB sessions, authentication, and shared services. Never instantiate dependencies manually in route handlers.
+- **Version all routes** under `/api/v1/`. Never expose unversioned endpoints.
+
+---
+
+## 3. Project Structure
+
+```
+app/
+├── api/
+│   └── v1/
+│       └── routes/       # Route handlers only — thin, no business logic
+├── core/
+│   ├── config.py         # Settings via pydantic-settings
+│   ├── security.py       # JWT, password hashing
+│   └── deps.py           # Shared Depends() factories
+├── models/               # SQLAlchemy ORM models
+├── schemas/              # Pydantic request/response models
+├── repositories/         # Database queries (CRUD operations)
+├── services/             # Business logic
+└── main.py
+```
+
+- **Thin routes:** Route handlers delegate to services. No business logic in route files.
+- **Repository pattern:** All database access goes through `app/repositories/`. Never query the DB directly from routes or services without a repository.
+- **Service layer:** Business logic lives in `app/services/`. Services call repositories, not raw SQLAlchemy sessions.
+
+---
+
+## 4. Database Access
+
+- **SQLAlchemy 2.0 async** with `asyncpg` driver. Use `AsyncSession` everywhere.
+- **No raw SQL in routes:** Use SQLAlchemy ORM queries via repositories. Raw SQL only in repositories when ORM is impractical, with parameterized queries.
+- **Session management:** Use a `get_db` dependency that yields an `AsyncSession` and handles commit/rollback/close.
+- **Migrations:** All schema changes via Alembic. Never run manual `ALTER TABLE` in production.
+
+---
+
+## 5. Security
+
+- **JWT via HttpOnly cookies** — match the frontend security rule in [nextjs.mdc](mdc:.cursor/rules/nextjs.mdc). Never return tokens in JSON response bodies.
+- **CORS:** Configure explicitly with allowed origins from environment variables. Never use `allow_origins=["*"]` in production.
+- **Rate limiting:** Apply rate limiting on authentication endpoints (`/login`, `/register`, `/refresh`).
+- **Password hashing:** Use `passlib` with `bcrypt` or `argon2`. Never store plain-text passwords.
+- **Input sanitization:** Pydantic validates types and constraints, but also sanitize string inputs that will be stored or rendered.
+
+---
+
+## 6. Error Handling
+
+- **Global exception handlers:** Register handlers in `main.py` for `HTTPException`, validation errors, and unhandled exceptions.
+- **Never expose stack traces** in production responses. Log internally, return generic error messages to clients.
+- **Structured logging:** Use Python `logging` with structured output (JSON in production). Log request ID, user ID, and error details.
+
+---
+
+## 7. Configuration
+
+- **pydantic-settings:** Load all config from environment variables via a `Settings` class in `app/core/config.py`.
+- **Validate at startup:** The app must fail to start if required environment variables are missing.
+- **No hardcoded secrets:** Database URLs, JWT secrets, and API keys must come from environment variables only.

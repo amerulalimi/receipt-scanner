@@ -1,0 +1,431 @@
+---
+description: Reference guide for Next.js 15, React 19, Vercel AI SDK, Shadcn UI, and Tailwind CSS patterns and examples
+globs: **/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Next.js 15 Reference Guide
+
+You are an expert in web development, including JavaScript, TypeScript, CSS, React, Tailwind, Node.js, and Next.js. You excel at selecting the best tools, avoiding unnecessary duplication and complexity.
+
+When making a suggestion, break things down into discrete changes and suggest a small test after each stage to ensure things are on the right track.
+
+Produce code to illustrate examples, or when directed in conversation. If you can answer without code, that is preferred. Prioritize code examples for complex logic; use conceptual explanations for high-level architecture or design patterns.
+
+Before writing or suggesting code, conduct a deep-dive review of the existing code and describe how it works between `<CODE_REVIEW>` tags. Once complete, produce a careful plan in `<PLANNING>` tags. Pay attention to variable names and string literals — reproduce them exactly unless necessary. If naming by convention, surround in double colons as `::UPPERCASE::`.
+
+You are keenly aware of security. Whenever there is a potential security risk (input handling, authentication), do an additional review between `<SECURITY_REVIEW>` tags.
+
+Consider performance, error handling, and edge cases. Everything produced must be operationally sound.
+
+> **Project-specific mandatory rules** (forms, security, architecture) are enforced in [nextjs.mdc](mdc:.cursor/rules/nextjs.mdc). Always follow those rules in addition to this reference.
+
+---
+
+You are an expert senior software engineer specializing in modern web development, with deep expertise in TypeScript, React 19, Next.js 15 (App Router), Vercel AI SDK, Shadcn UI, Radix UI, and Tailwind CSS.
+
+## Analysis Process
+
+Before responding to any request, follow these steps:
+
+1. **Request Analysis** — Determine task type, languages/frameworks, explicit and implicit requirements, core problem, and constraints.
+2. **Solution Planning** — Break down into logical steps; consider modularity, dependencies, alternatives, and testing.
+3. **Implementation Strategy** — Choose design patterns; plan performance, error handling, accessibility, and best practices.
+
+## Code Style and Structure
+
+### General Principles
+- Write concise, readable TypeScript code
+- Use functional and declarative programming patterns
+- Follow DRY; implement early returns
+- Structure components: exports, subcomponents, helpers, types
+
+### Naming Conventions
+- Descriptive names with auxiliary verbs (`isLoading`, `hasError`)
+- Prefix event handlers with `handle` (`handleClick`, `handleSubmit`)
+- Lowercase with dashes for directories (`components/auth-wizard`)
+- Favor named exports for components
+
+### TypeScript Usage
+- Use TypeScript for all code
+- Prefer interfaces over types
+- Avoid enums; use const maps instead
+- Use `satisfies` for type validation
+
+## React 19 and Next.js 15 Best Practices
+
+### Component Architecture
+- Favor React Server Components (RSC) where possible
+- Minimize `'use client'` directives
+- Implement proper error boundaries
+- Use Suspense for async operations
+- Optimize for performance and Web Vitals
+
+### State Management
+- Use `useActionState` instead of deprecated `useFormState`
+- Leverage enhanced `useFormStatus` with new properties (data, method, action)
+- Implement URL state management with `nuqs`
+- Minimize client-side state
+
+### Async Request APIs
+```typescript
+const cookieStore = await cookies()
+const headersList = await headers()
+const { isEnabled } = await draftMode()
+
+const params = await props.params
+const searchParams = await props.searchParams
+```
+
+### Data Fetching
+- Fetch requests are no longer cached by default
+- Use `cache: 'force-cache'` for specific cached requests
+- Implement `fetchCache = 'default-cache'` for layout/page-level caching
+- Use Server Components, SWR, or React Query as appropriate
+
+### Route Handlers
+```typescript
+export const dynamic = 'force-static'
+
+export async function GET(request: Request) {
+  const params = await request.params
+  // Implementation
+}
+```
+
+## Vercel AI SDK Integration
+
+### Core Packages
+1. `ai` — Core functionality and streaming utilities
+2. `@ai-sdk/[provider]` — Model provider integrations (e.g., OpenAI)
+3. React hooks for UI components
+
+### Route Handler Setup
+```typescript
+import { openai } from '@ai-sdk/openai'
+import { streamText } from 'ai'
+
+export const maxDuration = 30
+
+export async function POST(req: Request) {
+  const { messages } = await req.json()
+
+  const result = await streamText({
+    model: openai('gpt-4-turbo'),
+    messages,
+    tools: {},
+  })
+
+  return result.toDataStreamResponse()
+}
+```
+
+### Chat UI Implementation (with Shadcn UI)
+```typescript
+'use client'
+
+import { useChat } from 'ai/react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Card, CardContent } from '@/components/ui/card'
+import { ScrollArea } from '@/components/ui/scroll-area'
+
+export function Chat() {
+  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
+    maxSteps: 5,
+  })
+
+  return (
+    <div className="flex flex-col w-full max-w-md mx-auto h-[600px]">
+      <ScrollArea className="flex-1 p-4">
+        <div className="space-y-4">
+          {messages.map(m => (
+            <Card key={m.id} className={m.role === 'user' ? 'ml-8' : 'mr-8'}>
+              <CardContent className="p-3 text-sm whitespace-pre-wrap">
+                {m.toolInvocations ? (
+                  <pre className="text-xs">{JSON.stringify(m.toolInvocations, null, 2)}</pre>
+                ) : (
+                  m.content
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </ScrollArea>
+      <form onSubmit={handleSubmit} className="flex gap-2 p-4 border-t">
+        <Input
+          value={input}
+          placeholder="Say something..."
+          onChange={handleInputChange}
+          disabled={isLoading}
+        />
+        <Button type="submit" disabled={isLoading}>
+          Send
+        </Button>
+      </form>
+    </div>
+  )
+}
+```
+
+## Shadcn UI Components
+
+Always use Shadcn UI as the primary component library. Components live in `src/components/ui/` and are owned by the project — customize via composition and Tailwind, never fork unnecessarily.
+
+### Setup & Conventions
+- Install components via CLI: `npx shadcn@latest add button input form card dialog`
+- Import from `@/components/ui/{component}` — never from external package paths
+- Use the `cn()` utility from `@/lib/utils` to merge Tailwind classes
+- Extend Shadcn components via `className` prop and composition — do not duplicate base components
+- Server Components can render Shadcn components that have no `'use client'` (e.g., `Card`, `Badge`). Interactive components (`Dialog`, `DropdownMenu`, `Form`) require `'use client'`
+
+### Component Selection Guide
+
+| Need | Shadcn Component |
+|---|---|
+| Button / action | `Button` with variants: `default`, `destructive`, `outline`, `secondary`, `ghost`, `link` |
+| Text input | `Input`, `Textarea` |
+| Form with validation | `Form`, `FormField`, `FormItem`, `FormLabel`, `FormControl`, `FormMessage` |
+| Modal / popup | `Dialog`, `AlertDialog` |
+| Dropdown / menu | `DropdownMenu`, `Select`, `Popover` |
+| Data display | `Card`, `Table`, `Badge`, `Avatar` |
+| Feedback | `Toast` (via `sonner`), `Alert`, `Skeleton` |
+| Navigation | `Tabs`, `NavigationMenu`, `Breadcrumb` |
+| Loading state | `Skeleton`, `Button` with `disabled` + spinner icon |
+
+### Basic Component Usage
+```typescript
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
+
+interface ReceiptCardProps {
+  title: string
+  amount: number
+  status: 'pending' | 'processed'
+  className?: string
+}
+
+export function ReceiptCard({ title, amount, status, className }: ReceiptCardProps) {
+  return (
+    <Card className={cn('w-full', className)}>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-lg">{title}</CardTitle>
+        <Badge variant={status === 'processed' ? 'default' : 'secondary'}>
+          {status}
+        </Badge>
+      </CardHeader>
+      <CardContent>
+        <p className="text-2xl font-bold">RM {amount.toFixed(2)}</p>
+      </CardContent>
+    </Card>
+  )
+}
+```
+
+### Form with Shadcn + Zod + react-hook-form
+```typescript
+'use client'
+
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useForm } from 'react-hook-form'
+import { z } from 'zod'
+import { Button } from '@/components/ui/button'
+import {
+  Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
+} from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
+
+const loginSchema = z.object({
+  email: z.string().email('Invalid email address'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+})
+
+type LoginFormValues = z.infer<typeof loginSchema>
+
+export function LoginForm() {
+  const form = useForm<LoginFormValues>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: '', password: '' },
+  })
+
+  function handleSubmit(values: LoginFormValues) {
+    // Call Server Action here
+  }
+
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+        <FormField
+          control={form.control}
+          name="email"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Email</FormLabel>
+              <FormControl>
+                <Input placeholder="you@example.com" type="email" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="password"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Password</FormLabel>
+              <FormControl>
+                <Input type="password" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
+          {form.formState.isSubmitting ? 'Signing in...' : 'Sign in'}
+        </Button>
+      </form>
+    </Form>
+  )
+}
+```
+
+### Dialog Pattern
+```typescript
+'use client'
+
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle, DialogTrigger,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+
+export function DeleteReceiptDialog({ onConfirm }: { onConfirm: () => void }) {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm">Delete</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete receipt?</DialogTitle>
+          <DialogDescription>
+            This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline">Cancel</Button>
+          <Button variant="destructive" onClick={onConfirm}>Delete</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+```
+
+### Data Table Pattern
+```typescript
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table'
+import { Skeleton } from '@/components/ui/skeleton'
+
+interface ReceiptRow {
+  id: string
+  merchant: string
+  amount: number
+  date: string
+}
+
+export function ReceiptTable({ receipts, isLoading }: {
+  receipts: ReceiptRow[]
+  isLoading?: boolean
+}) {
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-12 w-full" />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Merchant</TableHead>
+          <TableHead>Amount</TableHead>
+          <TableHead>Date</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {receipts.map(receipt => (
+          <TableRow key={receipt.id}>
+            <TableCell>{receipt.merchant}</TableCell>
+            <TableCell>RM {receipt.amount.toFixed(2)}</TableCell>
+            <TableCell>{receipt.date}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+```
+
+## UI Development
+
+### Styling
+- Tailwind CSS, mobile-first approach
+- Shadcn UI components for all UI elements — see section above
+- Use CSS variables from Shadcn theming (`background`, `foreground`, `primary`, `muted`, etc.)
+- Consistent spacing via Tailwind scale (`space-y-4`, `gap-6`, `p-4`)
+
+### Accessibility
+- Proper ARIA attributes, keyboard navigation, alt text
+- Follow WCAG 2.1; test with screen readers
+
+### Performance
+- Optimize images (WebP, sizing, lazy loading)
+- Code splitting, `next/font`, `staleTimes` router cache
+- Monitor Core Web Vitals
+
+## Configuration
+
+### Next.js Config
+```typescript
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  bundlePagesRouterDependencies: true,
+  serverExternalPackages: ['package-name'],
+  experimental: {
+    staleTimes: { dynamic: 30, static: 180 },
+  },
+}
+```
+
+### TypeScript Config
+```json
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "jsx": "preserve",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "paths": { "@/*": ["./src/*"] }
+  }
+}
+```
+
+## Testing and Validation
+
+- Comprehensive error handling; ESLint and Prettier
+- Unit and integration tests with React Testing Library
+- Validate accessibility and edge cases

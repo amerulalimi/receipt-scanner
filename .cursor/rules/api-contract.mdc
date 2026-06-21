@@ -1,0 +1,112 @@
+---
+description: API contract between Next.js frontend and FastAPI backend — auth flow, data flow, and shared conventions
+alwaysApply: true
+---
+
+# API Contract (Frontend ↔ Backend)
+
+This rule governs how the Next.js frontend and FastAPI backend communicate. Both sides must follow these conventions.
+
+Related rules: [nextjs.mdc](mdc:.cursor/rules/nextjs.mdc) · [fastapi.mdc](mdc:.cursor/rules/fastapi.mdc) · [postgres.mdc](mdc:.cursor/rules/postgres.mdc)
+
+---
+
+## 1. Architecture Overview
+
+```
+Browser → Next.js (App Router) → FastAPI → PostgreSQL
+          ↑ Server Components       ↑ REST API
+          ↑ Server Actions          ↑ Pydantic validation
+          ↑ Route Handlers          ↑ SQLAlchemy ORM
+```
+
+- **Frontend NEVER accesses the database directly.** All data flows through FastAPI.
+- **Frontend NEVER calls external APIs directly** from Client Components. Proxy through Next.js Server Actions or Route Handlers.
+
+---
+
+## 2. Communication Pattern
+
+- **Base URL:** `process.env.FASTAPI_URL` — server-only env var, never prefix with `NEXT_PUBLIC_`.
+- **Server-side proxy:** Next.js Server Actions and Route Handlers call FastAPI using `fetch` or an HTTP client (e.g., `ky`, `ofetch`). Client Components never hold the FastAPI URL.
+- **API versioning:** All FastAPI endpoints live under `/api/v1/`. Frontend must include the version prefix in all calls.
+
+---
+
+## 3. Request & Response Format
+
+### Success Response
+```json
+{
+  "data": { ... },
+  "error": null
+}
+```
+
+### Error Response
+```json
+{
+  "data": null,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Human-readable error message"
+  }
+}
+```
+
+- Both sides must use this envelope. Frontend parses `data` and `error` consistently.
+- Shared error codes: `VALIDATION_ERROR`, `NOT_FOUND`, `UNAUTHORIZED`, `FORBIDDEN`, `INTERNAL_ERROR`.
+
+---
+
+## 4. Validation (Both Sides)
+
+| Layer | Tool | Location |
+|---|---|---|
+| Frontend forms | Zod | `src/lib/validations/` |
+| Frontend Server Actions | Zod (re-validate) | Same schemas as forms |
+| Backend API | Pydantic v2 | `app/schemas/` |
+
+- Validate on the frontend for UX (instant feedback).
+- Validate on the backend for security (never trust the client).
+- Schema field names must match between Zod and Pydantic (both use snake_case or both use camelCase — pick one and stick to it).
+
+---
+
+## 5. Authentication Flow
+
+```
+1. User submits login form (Next.js Client Component)
+2. Server Action sends credentials to FastAPI POST /api/v1/auth/login
+3. FastAPI validates, returns JWT
+4. Server Action sets HttpOnly, Secure, SameSite cookie
+5. Subsequent requests: Next.js reads cookie → forwards token to FastAPI in Authorization header
+6. FastAPI middleware validates JWT on protected routes
+```
+
+- **Tokens in HttpOnly cookies only** — never in localStorage, sessionStorage, or JSON responses.
+- **Token refresh:** FastAPI exposes `POST /api/v1/auth/refresh`. Next.js middleware handles silent refresh before token expiry.
+- **Logout:** Server Action clears the cookie and calls FastAPI `POST /api/v1/auth/logout`.
+
+---
+
+## 6. File Uploads (Receipt Scanning)
+
+- **Upload flow:** Client → Next.js Server Action → FastAPI `POST /api/v1/receipts/upload`
+- **Max file size:** Enforce on both Next.js (before proxy) and FastAPI (via middleware).
+- **Allowed types:** `image/jpeg`, `image/png`, `image/webp`, `application/pdf` — validate MIME type on both sides.
+- **Storage:** FastAPI handles file storage (local or S3). Return a URL/reference, not the raw file in API responses.
+
+---
+
+## 7. Error Handling Across Layers
+
+| Scenario | Frontend behavior | Backend behavior |
+|---|---|---|
+| Validation error (422) | Show field-level errors from `error.message` | Return Pydantic validation details |
+| Not found (404) | Show "not found" UI state | Return `{ error: { code: "NOT_FOUND" } }` |
+| Unauthorized (401) | Redirect to login | Return `{ error: { code: "UNAUTHORIZED" } }` |
+| Server error (500) | Show generic error toast | Log full error internally, return generic message |
+
+- Frontend Server Actions must catch FastAPI errors and map them to user-friendly messages.
+- Never expose FastAPI stack traces or internal error details to the browser.

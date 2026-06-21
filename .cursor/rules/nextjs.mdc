@@ -1,0 +1,80 @@
+---
+description: Mandatory Next.js project rules — enforced conventions for forms, architecture, security, and data handling
+alwaysApply: true
+---
+
+# Next.js Project Rules (Enforced)
+
+These are **mandatory** conventions for this project. Do not deviate unless explicitly instructed.
+
+For patterns, examples, and reference material, see [nextjs-react-generalist-cursor-rules.mdc](mdc:.cursor/rules/nextjs-react-generalist-cursor-rules.mdc).
+
+---
+
+## 1. Validation & Forms
+
+- **Always use Zod** for all input validation — forms, Server Actions, Route Handlers, and environment variables.
+- **Shared schemas:** Define Zod schemas once in `src/lib/validations/` and reuse on both client and server. Never duplicate validation logic.
+- **Forms:** Use `react-hook-form` + `zodResolver` from `@hookform/resolvers/zod` with Shadcn UI form components.
+- **Server Actions:** Validate all inputs with Zod at the top of every action. Return typed errors from `safeParse` failures.
+- **Route Handlers:** Validate request body, query params, and path params with Zod before processing.
+- **Environment variables:** Validate all `process.env` with a Zod schema at runtime (e.g., `@t3-oss/env-nextjs` pattern). The app must fail to build if required env variables are missing.
+
+---
+
+## 2. Senior-Level Component Architecture & State
+
+### Prop Design & Composition
+- **Keep Props Flat:** Avoid passing deeply nested objects as props. Prefer primitive values or flat interfaces to maximize component reusability and prevent unnecessary re-renders.
+- **Favor Component Composition:** To avoid "Prop Drilling", pass components as `children` or inject them as slots instead of passing data down multiple levels.
+- **RSC Over Client Fetching:** Fetch data at the Server Component level as close to the layout/page as possible. Do not drill data down more than 2 levels; if needed, refetch or use React Context (only in Client Components).
+
+### React 19 & Next.js 15 Data Mutations
+- **Zero Manual API for Mutations:** Do not write manual `fetch` or Axios calls for data mutations (POST/PUT/DELETE) inside Client Components. Always use **Server Actions**.
+- **Declarative Loading States:** Stop using local `isLoading` states for mutations. Use React 19's `useActionState` and leverage the `isPending` flag returned by the hook.
+- **Optimistic UI updates:** For high-frequency user actions (like liking a post or adding a comment), implement the `useOptimistic` hook to update the UI instantly before the server responds.
+
+### State & URL Management
+- **URL as Single Source of Truth:** For pagination, sorting, search queries, and open tabs, do not use `useState`. Use URL search parameters. Implement this elegantly using the `nuqs` library.
+- **Minimalist Client State:** Keep `'use client'` states local and ephemeral (e.g., toggle dropdowns). For global state, use lightweight stores like `Zustand` instead of heavy Redux or boilerplate-heavy Context providers.
+
+### Error & Async Handling
+- **No Manual Spinners for Page Loading:** Do not handle page-level loading states manually. Rely on Next.js `loading.tsx` and wrap async components inside explicit `<Suspense>` boundaries with a fallback UI.
+- **Type-Safe Environment Variables:** Validate all `process.env` variables using a Zod schema at runtime (e.g., using `@t3-oss/env-nextjs` pattern). The app must fail to build if required env variables are missing.
+
+---
+
+## 3. Frontend Security & Data Protection
+
+### XSS Mitigation & HTML Sanitization
+- **No Unsafe Inner HTML:** Strictly forbid the use of `dangerouslySetInnerHTML` unless the input is explicitly sanitized using `isomorphic-dompurify`.
+- **Safe Dynamic Links:** Always validate dynamic user-provided URLs before rendering them in `<a>` tags or `Link` components to prevent `javascript:` injection attacks.
+
+### Token Storage & Session Management
+- **Zero LocalStorage for Tokens:** Never store JWTs, access tokens, or sensitive user session data in `localStorage` or `sessionStorage` (highly vulnerable to XSS).
+- **HttpOnly Cookies Only:** All authentication tokens MUST be handled via `HttpOnly`, `Secure`, and `SameSite=Lax/Strict` cookies managed via Next.js `middleware.ts` or Server Actions.
+- **Mask Sensitive Client State:** Do not expose internal IDs, raw database keys, or full user profile objects in client-side state providers (e.g., Zustand) unless necessary for the UI.
+
+### Environment Variables & Data Leakage
+- **Strict NEXT_PUBLIC Usage:** Never prefix backend API keys, private tokens, or database credentials with `NEXT_PUBLIC_`.
+- **Server-Only Enforcement:** Use the `import 'server-only'` directive in files containing sensitive utility functions or backend clients to guarantee they never accidentally get imported into Client Components.
+
+### Content Security Policy (CSP) & Secure Headers
+- **Strict CSP:** Ensure the application implements a strict Content Security Policy (CSP) header (ideally via `middleware.ts` or `next.config.ts`) to restrict script execution to trusted origins only.
+
+---
+
+## 4. UI & Component Standards
+
+- **Shadcn UI first:** Use Shadcn/Radix components before building custom UI. Extend via composition, not duplication.
+- **Tailwind only:** No inline styles or CSS modules unless absolutely necessary. Use Tailwind utility classes with mobile-first breakpoints.
+- **Named exports:** All components must use named exports. No default exports for components.
+- **File structure:** One component per file. Co-locate component-specific types and helpers in the same directory.
+
+---
+
+## 5. Data Fetching & Caching
+
+- **Server-first:** Fetch data in Server Components by default. Only use client-side fetching (SWR/React Query) when real-time updates or user-triggered refetch is required.
+- **No fetch in useEffect for initial data:** Initial page data must come from the server, not a client-side `useEffect` fetch on mount.
+- **Explicit caching:** When caching is needed, set it explicitly (`cache: 'force-cache'`, `fetchCache`, or `unstable_cache`). Do not rely on implicit default caching.

@@ -1,0 +1,69 @@
+---
+description: PostgreSQL schema design, naming conventions, and migration standards
+globs: "**/*.{sql,py}"
+alwaysApply: false
+---
+
+# PostgreSQL Rules (Enforced)
+
+These are **mandatory** database conventions for this project. Do not deviate unless explicitly instructed.
+
+For ORM model patterns, see [fastapi.mdc](mdc:.cursor/rules/fastapi.mdc).
+
+---
+
+## 1. Schema Design
+
+- **UUID primary keys:** Use `gen_random_uuid()` as default — not auto-increment integers. Store as `UUID` type in SQLAlchemy.
+- **Timestamps on every table:** Every table must have `created_at TIMESTAMPTZ NOT NULL DEFAULT now()` and `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`.
+- **Soft delete:** Use a `deleted_at TIMESTAMPTZ NULL` column instead of hard `DELETE`. Filter with `WHERE deleted_at IS NULL` in all queries.
+- **Snake_case naming:** All table names, column names, indexes, and constraints use `snake_case`. No camelCase in the database.
+
+---
+
+## 2. Naming Conventions
+
+| Element | Convention | Example |
+|---|---|---|
+| Tables | Plural snake_case | `receipts`, `user_profiles` |
+| Columns | snake_case | `created_at`, `merchant_name` |
+| Primary keys | `id` (UUID) | `id UUID PRIMARY KEY DEFAULT gen_random_uuid()` |
+| Foreign keys | `{table_singular}_id` | `user_id`, `receipt_id` |
+| Indexes | `idx_{table}_{columns}` | `idx_receipts_user_id` |
+| Unique constraints | `uq_{table}_{columns}` | `uq_users_email` |
+
+---
+
+## 3. Migrations
+
+- **Alembic only:** All schema changes must go through Alembic migrations in `alembic/versions/`. Never apply manual DDL in production.
+- **Reversible migrations:** Every migration must have a working `downgrade()` function.
+- **One change per migration:** Do not combine unrelated schema changes in a single migration file.
+- **Descriptive names:** Migration filenames must describe the change — `add_receipts_table`, `add_index_on_users_email`.
+- **No destructive changes without backup plan:** Never drop columns or tables without a data migration strategy.
+
+---
+
+## 4. Indexing & Performance
+
+- **Index foreign keys:** Every foreign key column must have an index.
+- **Index frequently queried columns:** Columns used in `WHERE`, `ORDER BY`, or `JOIN` clauses need indexes.
+- **JSONB for flexible data:** Use `JSONB` for semi-structured metadata (e.g., OCR parsed fields, receipt line items). Add GIN indexes on JSONB columns that are queried.
+- **Avoid SELECT \*:** Repository queries must select only needed columns.
+
+---
+
+## 5. Data Integrity
+
+- **NOT NULL by default:** Columns should be `NOT NULL` unless NULL is semantically meaningful.
+- **Foreign key constraints:** Always define FK constraints with appropriate `ON DELETE` behavior (`CASCADE`, `SET NULL`, or `RESTRICT`).
+- **Check constraints:** Use check constraints for enum-like columns (e.g., `status IN ('pending', 'processed', 'failed')`).
+- **Unique constraints:** Enforce uniqueness at the database level, not just in application code.
+
+---
+
+## 6. Connection & Pooling
+
+- **Async driver:** Use `asyncpg` via SQLAlchemy async engine. Never use synchronous `psycopg2` in async routes.
+- **Connection pooling:** Configure pool size via environment variables (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`).
+- **Statement timeout:** Set a default statement timeout (e.g., 30s) to prevent runaway queries.
