@@ -2,7 +2,7 @@
 
 import { QRCodeSVG } from "qrcode.react";
 import { useRouter } from "next/navigation";
-import { useCallback, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { Camera, Link2, RefreshCw } from "lucide-react";
 
 import {
@@ -22,11 +22,17 @@ import type { UploadSessionCreateData } from "@/lib/api/types";
 import { formatCountdown } from "@/lib/upload-session-utils";
 import { useTranslations } from "@/lib/i18n/use-translations";
 
+type QrUploadSessionProps = {
+  selectedTaxYear: number;
+  variant?: "card" | "plain";
+  autoStart?: boolean;
+};
+
 export function QrUploadSession({
   selectedTaxYear,
-}: {
-  selectedTaxYear: number;
-}) {
+  variant = "card",
+  autoStart = false,
+}: QrUploadSessionProps) {
   const t = useTranslations("dashboard");
   const router = useRouter();
   const [session, setSession] = useState<UploadSessionCreateData | null>(null);
@@ -35,6 +41,7 @@ export function QrUploadSession({
   const [wsConnected, setWsConnected] = useState(false);
   const [warnSeconds, setWarnSeconds] = useState<number | null>(null);
   const [isCreating, startCreateTransition] = useTransition();
+  const [autoStarted, setAutoStarted] = useState(false);
 
   const startSession = useCallback(() => {
     setError(null);
@@ -53,6 +60,13 @@ export function QrUploadSession({
     });
   }, [selectedTaxYear, t]);
 
+  useEffect(() => {
+    if (autoStart && !autoStarted && !session && !isCreating) {
+      setAutoStarted(true);
+      startSession();
+    }
+  }, [autoStart, autoStarted, session, isCreating, startSession]);
+
   const handleSessionClosed = useCallback(
     (uploadsCount: number, totalAmount: number) => {
       setStatusMessage(
@@ -67,11 +81,9 @@ export function QrUploadSession({
   );
 
   const handleSessionExpired = useCallback(() => {
-      setStatusMessage("Session expired. Generating new QR code...");
-      startSession();
-    },
-    [startSession],
-  );
+    setStatusMessage("Session expired. Generating new QR code...");
+    startSession();
+  }, [startSession]);
 
   useUploadSessionWebSocket({
     token: session?.token ?? null,
@@ -91,6 +103,99 @@ export function QrUploadSession({
     onError: (message) => setError(message),
   });
 
+  const sessionContent = (
+    <div className="space-y-4">
+      {error ? (
+        <p
+          role="alert"
+          className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          {error}
+        </p>
+      ) : null}
+
+      {statusMessage ? (
+        <p
+          role="status"
+          className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-foreground"
+        >
+          {statusMessage}
+        </p>
+      ) : null}
+
+      {!session ? (
+        <Button type="button" onClick={startSession} disabled={isCreating}>
+          {isCreating ? "Generating QR…" : "Use phone camera"}
+        </Button>
+      ) : (
+        <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+          <div className="rounded-xl border bg-white p-4">
+            <QRCodeSVG
+              value={session.qr_data}
+              size={200}
+              level="M"
+              includeMargin
+              aria-label="QR code for receipt upload"
+            />
+          </div>
+
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              Scan this QR code with your phone, or share the link below.
+            </p>
+
+            <div className="flex items-start gap-2 rounded-lg border bg-muted/40 p-3">
+              <Link2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <a
+                href={session.upload_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="break-all text-primary underline-offset-4 hover:underline"
+              >
+                {session.upload_url}
+              </a>
+            </div>
+
+            <ul className="space-y-1 text-muted-foreground">
+              <li>
+                Inactivity timeout:{" "}
+                <span className="font-medium text-foreground">
+                  {formatCountdown(session.inactivity_timeout)}
+                </span>
+              </li>
+              <li>
+                Connection status:{" "}
+                <span className="font-medium text-foreground">
+                  {wsConnected ? "Connected" : "Connecting…"}
+                </span>
+              </li>
+              {warnSeconds !== null ? (
+                <li className="text-amber-600 dark:text-amber-400">
+                  Warning: session expires in {formatCountdown(warnSeconds)}
+                </li>
+              ) : null}
+            </ul>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={startSession}
+              disabled={isCreating}
+            >
+              <RefreshCw className="size-4" aria-hidden />
+              Generate new QR code
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  if (variant === "plain") {
+    return sessionContent;
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -102,92 +207,7 @@ export function QrUploadSession({
           Scan the QR code with your phone to capture receipts directly from the camera.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {error ? (
-          <p
-            role="alert"
-            className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          >
-            {error}
-          </p>
-        ) : null}
-
-        {statusMessage ? (
-          <p
-            role="status"
-            className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-foreground"
-          >
-            {statusMessage}
-          </p>
-        ) : null}
-
-        {!session ? (
-          <Button type="button" onClick={startSession} disabled={isCreating}>
-            {isCreating ? "Generating QR…" : "Use phone camera"}
-          </Button>
-        ) : (
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
-            <div className="rounded-xl border bg-white p-4">
-              <QRCodeSVG
-                value={session.qr_data}
-                size={200}
-                level="M"
-                includeMargin
-                aria-label="QR code for receipt upload"
-              />
-            </div>
-
-            <div className="space-y-3 text-sm">
-              <p className="text-muted-foreground">
-                Scan this QR code with your phone, or share the link below.
-              </p>
-
-              <div className="flex items-start gap-2 rounded-lg border bg-muted/40 p-3">
-                <Link2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                <a
-                  href={session.upload_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="break-all text-primary underline-offset-4 hover:underline"
-                >
-                  {session.upload_url}
-                </a>
-              </div>
-
-              <ul className="space-y-1 text-muted-foreground">
-                <li>
-                  Inactivity timeout:{" "}
-                  <span className="font-medium text-foreground">
-                    {formatCountdown(session.inactivity_timeout)}
-                  </span>
-                </li>
-                <li>
-                  Connection status:{" "}
-                  <span className="font-medium text-foreground">
-                    {wsConnected ? "Connected" : "Connecting…"}
-                  </span>
-                </li>
-                {warnSeconds !== null ? (
-                  <li className="text-amber-600 dark:text-amber-400">
-                    Warning: session expires in {formatCountdown(warnSeconds)}
-                  </li>
-                ) : null}
-              </ul>
-
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={startSession}
-                disabled={isCreating}
-              >
-                <RefreshCw className="size-4" aria-hidden />
-                Generate new QR code
-              </Button>
-            </div>
-          </div>
-        )}
-      </CardContent>
+      <CardContent>{sessionContent}</CardContent>
     </Card>
   );
 }

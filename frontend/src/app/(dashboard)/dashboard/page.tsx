@@ -7,8 +7,7 @@ import { EmailVerificationBanner } from "@/components/dashboard/email-verificati
 import { ReceiptHistorySection } from "@/components/dashboard/receipt-history-section";
 import { SmartRemindersPanel } from "@/components/dashboard/smart-reminders-panel";
 import { YearEndReminderBanner } from "@/components/dashboard/year-end-reminder-banner";
-import { QrUploadSession } from "@/components/receipts/qr-upload-session";
-import { ReceiptUploadForm } from "@/components/receipts/receipt-upload-form";
+import { ReceiptUploadActions } from "@/components/receipts/receipt-upload-actions";
 import { fetchClaimComparison, fetchClaimSummary, fetchCompletenessScore } from "@/lib/api/claims";
 import { fetchNotifications } from "@/lib/api/notifications";
 import { fetchReliefCategories } from "@/lib/api/admin-system";
@@ -156,10 +155,13 @@ export default async function DashboardPage({
             {t("dashboard", "subtitle", { year: selectedTaxYear })}
           </p>
         </div>
-        <DashboardYearFilter
-          defaultYear={defaultTaxYear}
-          label={t("dashboard", "taxYear")}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <ReceiptUploadActions defaultTaxYear={selectedTaxYear} />
+          <DashboardYearFilter
+            defaultYear={defaultTaxYear}
+            label={t("dashboard", "taxYear")}
+          />
+        </div>
       </header>
 
       {!meResult.body.data.email_verified ? (
@@ -198,11 +200,6 @@ export default async function DashboardPage({
         taxYear={selectedTaxYear}
         locale={locale}
       />
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ReceiptUploadForm defaultTaxYear={selectedTaxYear} />
-        <QrUploadSession selectedTaxYear={selectedTaxYear} />
-      </div>
     </main>
   );
 }

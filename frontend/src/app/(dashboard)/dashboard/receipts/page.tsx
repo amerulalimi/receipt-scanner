@@ -1,12 +1,10 @@
-import Link from "next/link";
-
 import { DashboardError } from "@/components/dashboard/dashboard-error";
 import { ExportReceiptsButton } from "@/components/receipts/export-receipts-button";
+import { ReceiptUploadActions } from "@/components/receipts/receipt-upload-actions";
 import { ManualReceiptForm } from "@/components/receipts/manual-receipt-form";
 import { ReceiptsFilters } from "@/components/receipts/receipts-filters";
 import { ReceiptsListSection } from "@/components/receipts/receipts-list-section";
 import { ReceiptsPagination } from "@/components/receipts/receipts-pagination";
-import { Button } from "@/components/ui/button";
 import { fetchReceipts } from "@/lib/api/receipts";
 import { fetchReliefCategories } from "@/lib/api/admin-system";
 import { getMeWithFastApi } from "@/lib/api/auth-me";
@@ -124,9 +122,7 @@ export default async function ReceiptsPage({ searchParams }: ReceiptsPageProps) 
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ExportReceiptsButton taxYear={selectedTaxYear} />
-          <Button variant="outline" size="sm" render={<Link href="/dashboard" />}>
-            {t("common", "uploadReceipt")}
-          </Button>
+          <ReceiptUploadActions defaultTaxYear={selectedTaxYear} />
         </div>
       </header>
 

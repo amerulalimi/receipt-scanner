@@ -10,7 +10,8 @@
     "taxYear": "Tax year",
     "show": "Show",
     "viewAll": "View all",
-    "uploadReceipt": "Upload receipt"
+    "uploadReceipt": "Upload receipt",
+    "uploadFromPhone": "Upload from phone"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -35,7 +36,7 @@
     "reliefLimitsHint": "Warnings appear when claims reach 80% of the annual limit.",
     "noReliefData": "No relief data for this year.",
     "receiptHistory": "Receipt history",
-    "receiptHistoryEmpty": "Upload your first receipt below.",
+    "receiptHistoryEmpty": "Upload your first receipt using the buttons at the top right.",
     "receiptHistoryCount": "{count} receipts recorded for {year}.",
     "processingNotice": "Receipts are being processed by the AI worker. Make sure {command} is running in the backend terminal.",
     "waitingNotice": "Receipts are waiting for manual review (e.g. PDF) or queue processing.",
@@ -88,7 +89,9 @@
     "invalidFilters": "Invalid filter parameters. Please try again.",
     "loadError": "Failed to load receipt list.",
     "noReceipts": "No receipts found.",
-    "noReceiptsHint": "No receipts found. Try changing filters or upload a new receipt from the dashboard.",
+    "noReceiptsHint": "No receipts found. Try changing filters or upload a new receipt using the buttons at the top right.",
+    "scanDetailsTitle": "AI scan details",
+    "viewScanDetails": "View scan details",
     "listSectionTitle": "Receipt list",
     "listSectionDescription": "{total} receipts recorded — edit category or delete unneeded receipts.",
     "merchantProcessing": "Processing…",

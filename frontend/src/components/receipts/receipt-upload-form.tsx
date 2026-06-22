@@ -48,9 +48,17 @@ function formatFileSize(bytes: number): string {
 
 type ReceiptUploadFormProps = {
   defaultTaxYear: number;
+  variant?: "card" | "plain";
+  onSuccess?: () => void;
+  fileInputId?: string;
 };
 
-export function ReceiptUploadForm({ defaultTaxYear }: ReceiptUploadFormProps) {
+export function ReceiptUploadForm({
+  defaultTaxYear,
+  variant = "card",
+  onSuccess,
+  fileInputId = "receipt-file",
+}: ReceiptUploadFormProps) {
   const router = useRouter();
   const t = useTranslations("dashboard");
   const tCommon = useTranslations("common");
@@ -115,7 +123,7 @@ export function ReceiptUploadForm({ defaultTaxYear }: ReceiptUploadFormProps) {
     handledSuccessStateRef.current = state;
 
     form.reset({ files: [], tax_year: defaultTaxYear });
-    const input = document.getElementById("receipt-file") as HTMLInputElement | null;
+    const input = document.getElementById(fileInputId) as HTMLInputElement | null;
     if (input) {
       input.value = "";
     }
@@ -133,7 +141,8 @@ export function ReceiptUploadForm({ defaultTaxYear }: ReceiptUploadFormProps) {
 
     sessionStorage.removeItem("resit-scan-failed-toast-shown");
     router.refresh();
-  }, [state, defaultTaxYear, form, router, t]);
+    onSuccess?.();
+  }, [state, defaultTaxYear, form, router, t, onSuccess, fileInputId]);
 
   function onSubmit(values: ReceiptBulkUploadFormValues) {
     const formData = new FormData();
@@ -152,6 +161,103 @@ export function ReceiptUploadForm({ defaultTaxYear }: ReceiptUploadFormProps) {
     form.setValue("files", nextFiles, { shouldValidate: true });
   }
 
+  const formContent = (
+    <form onSubmit={form.handleSubmit(onSubmit)}>
+      <FieldGroup>
+        <Controller
+          name="tax_year"
+          control={form.control}
+          render={({ field, fieldState }) => (
+            <Field data-invalid={!!fieldState.error}>
+              <TaxYearSelect
+                label={tCommon("taxYear")}
+                value={field.value}
+                anchorYear={defaultTaxYear}
+                onValueChange={field.onChange}
+              />
+              <FieldError errors={[fieldState.error]} />
+            </Field>
+          )}
+        />
+
+        <Controller
+          name="files"
+          control={form.control}
+          render={({ field: { onChange, ref, name, onBlur }, fieldState }) => (
+            <Field data-invalid={!!fieldState.error}>
+              <FieldLabel htmlFor={fileInputId}>{t("uploadFilesLabel")}</FieldLabel>
+              <Input
+                id={fileInputId}
+                ref={ref}
+                name={name}
+                type="file"
+                multiple
+                accept={RECEIPT_UPLOAD_ACCEPT}
+                aria-invalid={!!fieldState.error}
+                onBlur={onBlur}
+                onChange={(event) => {
+                  const fileList = event.target.files;
+                  if (!fileList?.length) {
+                    onChange([]);
+                    return;
+                  }
+                  onChange(Array.from(fileList));
+                }}
+              />
+              <FieldError errors={[fieldState.error]} />
+            </Field>
+          )}
+        />
+
+        {selectedFiles.length > 0 ? (
+          <ul className="space-y-2 rounded-lg border bg-muted/30 p-3">
+            {selectedFiles.map((file, index) => (
+              <li
+                key={`${file.name}-${file.size}-${index}`}
+                className="flex items-center gap-3 text-sm"
+              >
+                <FileImage
+                  className="size-4 shrink-0 text-muted-foreground"
+                  aria-hidden
+                />
+                <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                <span className="shrink-0 text-muted-foreground">
+                  {formatFileSize(file.size)}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 shrink-0"
+                  disabled={isPending}
+                  aria-label={t("removeFile", { name: file.name })}
+                  onClick={() => removeFile(index)}
+                >
+                  <X className="size-4" aria-hidden />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        <Button type="submit" disabled={isPending || selectedFiles.length === 0}>
+          {isPending
+            ? t("uploading")
+            : selectedFiles.length > 1
+              ? t("uploadMultiple", { count: selectedFiles.length })
+              : t("uploadSingle")}
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          {tCommon("taxYear")}: {selectedTaxYear}
+        </p>
+      </FieldGroup>
+    </form>
+  );
+
+  if (variant === "plain") {
+    return formContent;
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -160,98 +266,7 @@ export function ReceiptUploadForm({ defaultTaxYear }: ReceiptUploadFormProps) {
           {t("uploadDescription", { max: RECEIPT_UPLOAD_MAX_FILES })}
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
-          <FieldGroup>
-            <Controller
-              name="tax_year"
-              control={form.control}
-              render={({ field, fieldState }) => (
-                <Field data-invalid={!!fieldState.error}>
-                  <TaxYearSelect
-                    label={tCommon("taxYear")}
-                    value={field.value}
-                    anchorYear={defaultTaxYear}
-                    onValueChange={field.onChange}
-                  />
-                  <FieldError errors={[fieldState.error]} />
-                </Field>
-              )}
-            />
-
-            <Controller
-              name="files"
-              control={form.control}
-              render={({ field: { onChange, ref, name, onBlur }, fieldState }) => (
-                <Field data-invalid={!!fieldState.error}>
-                  <FieldLabel htmlFor="receipt-file">{t("uploadFilesLabel")}</FieldLabel>
-                  <Input
-                    id="receipt-file"
-                    ref={ref}
-                    name={name}
-                    type="file"
-                    multiple
-                    accept={RECEIPT_UPLOAD_ACCEPT}
-                    aria-invalid={!!fieldState.error}
-                    onBlur={onBlur}
-                    onChange={(event) => {
-                      const fileList = event.target.files;
-                      if (!fileList?.length) {
-                        onChange([]);
-                        return;
-                      }
-                      onChange(Array.from(fileList));
-                    }}
-                  />
-                  <FieldError errors={[fieldState.error]} />
-                </Field>
-              )}
-            />
-
-            {selectedFiles.length > 0 ? (
-              <ul className="space-y-2 rounded-lg border bg-muted/30 p-3">
-                {selectedFiles.map((file, index) => (
-                  <li
-                    key={`${file.name}-${file.size}-${index}`}
-                    className="flex items-center gap-3 text-sm"
-                  >
-                    <FileImage
-                      className="size-4 shrink-0 text-muted-foreground"
-                      aria-hidden
-                    />
-                    <span className="min-w-0 flex-1 truncate">{file.name}</span>
-                    <span className="shrink-0 text-muted-foreground">
-                      {formatFileSize(file.size)}
-                    </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 shrink-0"
-                      disabled={isPending}
-                      aria-label={t("removeFile", { name: file.name })}
-                      onClick={() => removeFile(index)}
-                    >
-                      <X className="size-4" aria-hidden />
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-
-            <Button type="submit" disabled={isPending || selectedFiles.length === 0}>
-              {isPending
-                ? t("uploading")
-                : selectedFiles.length > 1
-                  ? t("uploadMultiple", { count: selectedFiles.length })
-                  : t("uploadSingle")}
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              {tCommon("taxYear")}: {selectedTaxYear}
-            </p>
-          </FieldGroup>
-        </form>
-      </CardContent>
+      <CardContent>{formContent}</CardContent>
     </Card>
   );
 }

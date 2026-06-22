@@ -1,11 +1,11 @@
 "use client";
 
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
-import { Fragment, useCallback, useState } from "react";
+import { Fragment } from "react";
 
-import { getReceiptDetailAction } from "@/actions/receipt";
 import { ReceiptScanDetailPanel } from "@/components/dashboard/receipt-scan-detail-panel";
 import { Button } from "@/components/ui/button";
+import { useReceiptScanDetail } from "@/hooks/use-receipt-scan-detail";
 import {
   getCategoryLabel,
   getReceiptScanStatus,
@@ -13,7 +13,7 @@ import {
   getScanStatusLabel,
   getStatusLabel,
 } from "@/lib/constants/receipts";
-import type { ReceiptDetail, ReceiptListItem } from "@/lib/api/types";
+import type { ReceiptListItem } from "@/lib/api/types";
 import {
   formatReceiptDate,
   formatRinggit,
@@ -50,64 +50,8 @@ export function ReceiptHistoryTable({
   items,
   categoryLabels,
 }: ReceiptHistoryTableProps) {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [detailCache, setDetailCache] = useState<Record<string, ReceiptDetail>>(
-    {},
-  );
-  const [loadingId, setLoadingId] = useState<string | null>(null);
-  const [errorById, setErrorById] = useState<Record<string, string>>({});
-
-  const loadDetail = useCallback(
-    async (receiptId: string) => {
-      if (detailCache[receiptId]) {
-        return;
-      }
-
-      setLoadingId(receiptId);
-      setErrorById((prev) => {
-        const next = { ...prev };
-        delete next[receiptId];
-        return next;
-      });
-
-      const result = await getReceiptDetailAction(receiptId);
-
-      setLoadingId((current) => (current === receiptId ? null : current));
-
-      if (result.error || !result.data) {
-        setErrorById((prev) => ({
-          ...prev,
-          [receiptId]: result.error ?? "Failed to load scan details.",
-        }));
-        return;
-      }
-
-      setDetailCache((prev) => ({
-        ...prev,
-        [receiptId]: result.data!,
-      }));
-    },
-    [detailCache],
-  );
-
-  const toggleRow = useCallback(
-    (item: ReceiptListItem) => {
-      const isExpanded = expandedId === item.id;
-
-      if (isExpanded) {
-        setExpandedId(null);
-        return;
-      }
-
-      setExpandedId(item.id);
-
-      const scanStatus = getReceiptScanStatus(item);
-      if (scanStatus === "success" || scanStatus === "failed") {
-        void loadDetail(item.id);
-      }
-    },
-    [expandedId, loadDetail],
-  );
+  const { expandedId, detailCache, loadingId, errorById, toggleExpand } =
+    useReceiptScanDetail();
 
   return (
     <div className="overflow-x-auto">
@@ -147,7 +91,7 @@ export function ReceiptHistoryTable({
                       aria-expanded={isExpanded}
                       aria-controls={panelId}
                       aria-label="View scan details"
-                      onClick={() => toggleRow(item)}
+                      onClick={() => toggleExpand(item)}
                     >
                       {isExpanded ? (
                         <ChevronDownIcon className="size-4" />
