@@ -10,11 +10,11 @@ dist/
 build/
 *.egg-info/
 
-# Environment
+# Environment (never commit secrets or env templates)
 .env
+.env.*
 .env.local
 .env.*.local
-!.env.example
 
 # Python
 __pycache__/
