@@ -32,6 +32,7 @@ class ReceiptLineItemRepository:
         created: list[ReceiptLineItem] = []
         for index, item in enumerate(items):
             line_item = ReceiptLineItem(
+                id=uuid.uuid4(),
                 receipt_id=receipt_id,
                 sort_order=index,
                 description=item["description"],

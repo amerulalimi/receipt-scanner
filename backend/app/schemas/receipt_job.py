@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class ReceiptJobPayload(BaseModel):
+    job_id: str
     receipt_id: uuid.UUID
     user_id: uuid.UUID
     upload_session_token: str | None = None

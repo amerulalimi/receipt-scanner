@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 
 import type { HouseholdActionState } from "@/actions/household.types";
-import { initialHouseholdActionState } from "@/actions/household.types";
 import {
   dissolveSpouseLinkWithFastApi,
   reassignReceiptWithFastApi,
@@ -160,5 +159,3 @@ export async function reassignReceiptAction(
     };
   }
 }
-
-export { initialHouseholdActionState };

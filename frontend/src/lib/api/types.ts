@@ -15,10 +15,21 @@ export type ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse;
 
 export type LoginData = {
   user_id: string;
-  role: string;
-  org_id: string | null;
+  email: string;
   full_name: string | null;
+  role: string;
+  account_type: "individual" | "corporate";
+  org_id: string | null;
+  tax_year: number;
+  tax_bracket: number | null;
+  email_verified: boolean;
+  available_contexts: Array<"individual" | "corporate">;
+  active_context: "individual" | "corporate";
+  active_role: string;
+  active_org_id: string | null;
 };
+
+export type RegisterData = LoginData;
 
 export type MeData = {
   user_id: string;
@@ -31,7 +42,17 @@ export type MeData = {
   tax_year: number;
   tax_bracket: number | null;
   email_verified: boolean;
-  forwarding_address: string | null;
+  available_contexts: Array<"individual" | "corporate">;
+  active_context: "individual" | "corporate";
+  active_role: string;
+  active_org_id: string | null;
+  forwarding_address?: string | null;
+};
+
+export type AdminMeData = {
+  admin_id: string;
+  email: string;
+  full_name: string | null;
 };
 
 export type VerifyEmailData = {
@@ -72,10 +93,66 @@ export type OpenRouterHealthData = {
   http_status: number | null;
 };
 
-export type RegisterData = {
-  user_id: string;
+export type OpenRouterModelOption = {
+  id: string;
+  name: string;
+  prompt_price_per_million_usd: number;
+  completion_price_per_million_usd: number;
+  image_token_price_per_million_usd: number;
+};
+
+export type OpenRouterModelsData = {
+  models: OpenRouterModelOption[];
+  fetched_at: string | null;
+  message: string | null;
+};
+
+export type AdminUserListItem = {
+  id: string;
+  full_name: string | null;
+  account_type: "individual" | "corporate" | string;
   email: string;
-  email_verified: boolean;
+  created_at: string;
+  is_active: boolean;
+};
+
+export type AdminOrganizationListItem = {
+  id: string;
+  name: string;
+  email_domain: string;
+  status: "active" | "suspended" | string;
+  employee_count: number;
+  created_at: string;
+};
+
+export type AdminPaginatedUsersData = {
+  items: AdminUserListItem[];
+  page: number;
+  limit: number;
+  total: number;
+  total_pages: number;
+};
+
+export type AdminPaginatedOrganizationsData = {
+  items: AdminOrganizationListItem[];
+  page: number;
+  limit: number;
+  total: number;
+  total_pages: number;
+};
+
+export type RegistrationStatPoint = {
+  period: string;
+  label: string;
+  count: number;
+  cumulative: number;
+};
+
+export type RegistrationStatsData = {
+  series: RegistrationStatPoint[];
+  growth_percent: number;
+  growth_label: string;
+  total_in_range: number;
 };
 
 export type ClaimCategorySummary = {
@@ -83,6 +160,8 @@ export type ClaimCategorySummary = {
   be_seksyen: string | null;
   limit: number;
   claimed: number;
+  limit_amount?: number;
+  total_claimed?: number;
   remaining: number;
   percentage: number;
   receipt_count: number;
@@ -103,6 +182,12 @@ export type ClaimCompareData = {
   previous: ClaimSummaryData;
 };
 
+export type CompletenessBreakdownItem = {
+  criterion: string;
+  achieved: boolean;
+  points: number;
+};
+
 export type CompletenessScoreData = {
   tax_year: number;
   score: number;
@@ -112,6 +197,8 @@ export type CompletenessScoreData = {
   total_claimed: number | string;
   estimated_savings: number | string;
   milestone_message: string | null;
+  next_action?: string | null;
+  breakdown?: CompletenessBreakdownItem[];
 };
 
 export type ReadyToFileField = {
@@ -131,13 +218,24 @@ export type ReadyToFileChecklistItem = {
   text_en: string;
 };
 
+export type ReadyToFileFilingItem = {
+  be_field: string;
+  be_seksyen: string;
+  description: string;
+  amount_to_enter: number | string;
+  receipt_count: number;
+  status: "ready" | "partial" | "empty";
+};
+
 export type ReadyToFileData = {
   tax_year: number;
   total_claimed: number | string;
+  total_relief?: number | string;
   estimated_savings: number | string;
   tax_bracket: number;
   pending_review_count: number;
   fields: ReadyToFileField[];
+  filing_checklist?: ReadyToFileFilingItem[];
   checklist: ReadyToFileChecklistItem[];
 };
 
@@ -294,14 +392,37 @@ export type UploadSessionCloseData = {
   message: string;
 };
 
+export const WSEventType = {
+  receiptAdded: "receipt_added",
+  receiptScanUpdated: "receipt_scan_updated",
+  receiptFailed: "receipt_failed",
+  sessionWarned: "session_warned",
+  sessionExpired: "session_expired",
+  sessionClosed: "session_closed",
+} as const;
+
+export type WSEventTypeValue = (typeof WSEventType)[keyof typeof WSEventType];
+
+export type QRSession = UploadSessionCreateData;
+export type QRValidation = UploadSessionValidateData;
+
 export type DashboardWsEvent =
   | { type: "subscribed"; data: { upload_session_token: string } }
   | { type: "receipt_added"; data: { receipt: Record<string, unknown> } }
+  | {
+      type: "receipt_scan_updated";
+      data: { receipt_id: string; scan_status: string };
+    }
   | { type: "session_warned"; data: { seconds_remaining: number } }
   | { type: "session_expired"; data: { reason: string } }
   | { type: "session_closed"; data: { uploads_count: number; total_amount: number } }
   | { type: "receipt_failed"; data: { job_id: string; reason: string } }
   | { type: "error"; data: { message: string } };
+
+export type WSEvent = Exclude<
+  DashboardWsEvent,
+  { type: "subscribed" } | { type: "error" }
+>;
 
 export type OrgPolicyData = {
   allowed_categories: string[];
@@ -439,11 +560,21 @@ export type SystemOverviewData = {
   receipt_retention_days: number;
   receipt_queue_depth: number;
   total_audit_logs: number;
+  total_users?: number;
+  total_receipts?: number;
+  total_orgs?: number;
+  receipts_today?: number;
+  storage_backend?: string;
+  worker_status?: "running" | "stopped";
+  redis_connected?: boolean;
+  db_connected?: boolean;
 };
 
 export type RetentionPurgeData = {
   audit_logs_deleted: number;
   receipts_deleted: number;
+  purged_receipts?: number;
+  purged_sessions?: number;
   audit_retention_days: number;
   receipt_retention_days: number;
 };
@@ -495,10 +626,14 @@ export type ClaimSuggestionData = {
   receipt_id: string;
   category: string;
   suggested_user_id: string;
+  suggestion?: "self" | "spouse";
   reason_my: string;
   reason_en: string;
+  reason?: string;
   user_remaining: number | string;
   spouse_remaining: number | string;
+  my_bracket?: number | null;
+  spouse_bracket?: number | null;
 };
 
 export type OrgAnalyticsCategoryTrend = {

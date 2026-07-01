@@ -71,6 +71,14 @@ async def validate_invite(
     service: OrgService = Depends(_org_service),
 ) -> ApiResponse[InviteValidateResponseData]:
     data = await service.validate_invite(token)
+    if not data.valid:
+        from app.core.exceptions import AppError
+
+        raise AppError(
+            message="Jemputan tidak sah atau telah tamat tempoh.",
+            code="INVITE_NOT_FOUND",
+            status_code=404,
+        )
     return ApiResponse(success=True, data=data, message=None)
 
 

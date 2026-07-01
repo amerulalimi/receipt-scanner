@@ -10,6 +10,7 @@ from app.services.storage import get_receipt_storage
 from app.models.receipt import Receipt
 from app.models.receipt_flag import ReceiptFlag
 from app.models.user import User
+from app.repositories.org_policy import OrgPolicyRepository
 from app.repositories.receipt import ReceiptRepository
 from app.repositories.receipt_line_item import ReceiptLineItemRepository
 from app.repositories.relief_limit import ReliefLimitRepository
@@ -26,7 +27,7 @@ from app.services.vision_llm import classify_receipt_async
 logger = logging.getLogger(__name__)
 
 LOW_OCR_CONFIDENCE = 0.70
-LOW_AI_CONFIDENCE = 0.85
+LOW_AI_CONFIDENCE = 0.70
 CRITICAL_FLAG_TYPES = frozenset(
     {"manual_review", "low_ocr_confidence", "limit_exceeded"},
 )
@@ -41,6 +42,7 @@ class ReceiptProcessor:
         self._relief_limits = ReliefLimitRepository(db)
         self._limits = ClaimLimitService(db)
         self._receipt_service = ReceiptService(db)
+        self._org_policies = OrgPolicyRepository(db)
 
     async def process(self, job: ReceiptJobPayload) -> None:
         receipt = await self._receipts.get_by_id(job.receipt_id, include_flags=True)
@@ -56,17 +58,38 @@ class ReceiptProcessor:
         try:
             receipt.scan_status = "processing"
             await self._db.flush()
-            await self._process_receipt(receipt, user, job.upload_session_token)
+            await self._publish_scan_updated(receipt, job.upload_session_token)
+            await self._process_receipt(receipt, user, job)
         except Exception as exc:
             logger.exception("Failed to process receipt %s", job.receipt_id)
             await self._handle_failure(receipt, job, str(exc))
+
+    async def _publish_scan_updated(
+        self,
+        receipt: Receipt,
+        upload_session_token: str | None,
+    ) -> None:
+        if not upload_session_token:
+            return
+        await publish_ws_event(
+            self._redis,
+            upload_session_token=upload_session_token,
+            event={
+                "type": "receipt_scan_updated",
+                "data": {
+                    "receipt_id": str(receipt.id),
+                    "scan_status": receipt.scan_status,
+                },
+            },
+        )
 
     async def _process_receipt(
         self,
         receipt: Receipt,
         user: User,
-        upload_session_token: str | None,
+        job: ReceiptJobPayload,
     ) -> None:
+        upload_session_token = job.upload_session_token
         if receipt.file_type == "pdf":
             await self._apply_pdf_manual_review(receipt)
         else:
@@ -74,9 +97,11 @@ class ReceiptProcessor:
 
         self._resolve_tax_year_from_receipt_date(receipt, user)
         await self._apply_rule_engine(receipt, user)
+        await self._apply_org_category_policy(receipt, user)
         await self._maybe_auto_approve(receipt, user)
         await self._db.flush()
         await self._db.refresh(receipt, attribute_names=["flags"])
+        await self._publish_scan_updated(receipt, upload_session_token)
 
         if upload_session_token:
             detail = await self._receipt_service.get_receipt(user, receipt.id)
@@ -92,7 +117,7 @@ class ReceiptProcessor:
     async def _apply_pdf_manual_review(self, receipt: Receipt) -> None:
         receipt.category = "semak_manual"
         receipt.status = "pending"
-        receipt.scan_status = "waiting"
+        receipt.scan_status = "failed"
         self._add_flag(
             receipt,
             flag_type="manual_review",
@@ -324,8 +349,34 @@ class ReceiptProcessor:
                 )
                 return
 
+    async def _apply_org_category_policy(self, receipt: Receipt, user: User) -> None:
+        if user.org_id is None or not receipt.category:
+            return
+
+        policy = await self._org_policies.get_by_org_id(user.org_id)
+        if policy is None:
+            return
+
+        allowed = set(policy.allowed_categories)
+        if (
+            receipt.category not in allowed
+            and receipt.category not in NON_CLAIMABLE_CATEGORIES
+        ):
+            receipt.status = "flagged"
+            self._add_flag(
+                receipt,
+                flag_type="category_not_allowed",
+                message=(
+                    f"Kategori {receipt.category} tidak dibenarkan oleh polisi organisasi."
+                ),
+            )
+
     async def _maybe_auto_approve(self, receipt: Receipt, user: User) -> None:
-        if user.role != "individual":
+        if user.org_id is not None:
+            policy = await self._org_policies.get_by_org_id(user.org_id)
+            if policy is None or policy.require_hr_approval:
+                return
+        elif user.role != "individual":
             return
         if receipt.status == "flagged":
             return
@@ -394,11 +445,12 @@ class ReceiptProcessor:
                 event={
                     "type": "receipt_failed",
                     "data": {
-                        "job_id": str(job.receipt_id),
+                        "job_id": job.job_id,
                         "reason": user_message[:200],
                     },
                 },
             )
+            await self._publish_scan_updated(receipt, job.upload_session_token)
 
     def _add_flag(
         self,

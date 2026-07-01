@@ -7,10 +7,10 @@ import { toast } from "sonner";
 
 import {
   dissolveSpouseLinkAction,
-  initialHouseholdActionState,
   requestSpouseLinkAction,
   respondSpouseLinkAction,
 } from "@/actions/household";
+import { initialHouseholdActionState } from "@/actions/household.types";
 import { Button } from "@/components/ui/button";
 import {
   Card,

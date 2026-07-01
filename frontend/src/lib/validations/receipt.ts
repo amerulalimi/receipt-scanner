@@ -209,7 +209,7 @@ export const receiptListFiltersSchema = z.object({
 
 export type ReceiptListFilters = z.infer<typeof receiptListFiltersSchema>;
 
-export const DASHBOARD_RECEIPT_HISTORY_LIMITS = [10, 20, 50] as const;
+export const DASHBOARD_RECEIPT_HISTORY_LIMITS = [5, 10, 20, 50] as const;
 
 export type DashboardReceiptHistoryLimit =
   (typeof DASHBOARD_RECEIPT_HISTORY_LIMITS)[number];
@@ -225,7 +225,7 @@ export const dashboardReceiptHistorySchema = z.object({
         ),
       "Invalid history limit",
     )
-    .default(10),
+    .default(5),
   tax_year: optionalTaxYearQuerySchema,
 });
 
@@ -259,7 +259,7 @@ export function parseDashboardReceiptHistorySearchParams(
   searchParams: Record<string, string | string[] | undefined>,
 ) {
   return dashboardReceiptHistorySchema.safeParse({
-    history_limit: getSearchParamValue(searchParams.history_limit) ?? "10",
+    history_limit: getSearchParamValue(searchParams.history_limit) ?? "5",
     tax_year: getSearchParamValue(searchParams.tax_year),
   });
 }

@@ -55,13 +55,32 @@ class ReminderEngine:
         reminders: list[ReminderCandidate] = []
 
         limits = await self._limits.list_active()
-        summaries = await self._claims.list_for_user(user_id=user.id, tax_year=tax_year)
+        summaries = await self._claims.list_for_user(
+            user_id=user.id,
+            tax_year=tax_year,
+            context_type="individual",
+            org_id=None,
+        )
         summary_by_category = {item.category: item for item in summaries}
         receipt_counts = await self._receipts.count_by_category_for_user_year(
             user_id=user.id,
+            org_id=None,
             tax_year=tax_year,
         )
 
+        reminders.extend(
+            self._limit_warning_reminders(
+                tax_year=tax_year,
+                limits=limits,
+                summary_by_category=summary_by_category,
+            ),
+        )
+        reminders.extend(
+            self._profile_incomplete_reminder(user=user, tax_year=tax_year),
+        )
+        reminders.extend(
+            self._year_end_reminder(tax_year=tax_year, today=today),
+        )
         reminders.extend(
             self._year_end_zero_category_reminders(
                 tax_year=tax_year,
@@ -92,6 +111,97 @@ class ReminderEngine:
         )
 
         return reminders
+
+    def _limit_warning_reminders(
+        self,
+        *,
+        tax_year: int,
+        limits,
+        summary_by_category,
+    ) -> list[ReminderCandidate]:
+        reminders: list[ReminderCandidate] = []
+        for limit in limits:
+            if limit.limit_amount <= 0:
+                continue
+            summary = summary_by_category.get(limit.category)
+            claimed = summary.total_claimed if summary else Decimal("0")
+            pct = float((claimed / limit.limit_amount) * 100)
+            if pct < 80:
+                continue
+            label_my, label_en = CATEGORY_LABELS.get(
+                limit.category,
+                (limit.description_my or limit.category, limit.category),
+            )
+            reminders.append(
+                ReminderCandidate(
+                    reminder_key=f"limit_warning_{limit.category}_{tax_year}",
+                    type="limit_warning",
+                    severity="warning",
+                    title_my=f"Had {label_my} hampir penuh",
+                    title_en=f"{label_en} limit nearly full",
+                    message_my=(
+                        f"Anda telah menggunakan {pct:.0f}% daripada had {label_my}."
+                    ),
+                    message_en=(
+                        f"You have used {pct:.0f}% of your {label_en} limit."
+                    ),
+                    action_href="/receipts",
+                    expires_at=None,
+                ),
+            )
+        return reminders
+
+    def _profile_incomplete_reminder(
+        self,
+        *,
+        user: User,
+        tax_year: int,
+    ) -> list[ReminderCandidate]:
+        if user.tax_bracket is not None and user.full_name:
+            return []
+        return [
+            ReminderCandidate(
+                reminder_key=f"profile_incomplete_{tax_year}",
+                type="profile_incomplete",
+                severity="info",
+                title_my="Profil tidak lengkap",
+                title_en="Profile incomplete",
+                message_my=(
+                    "Tetapkan bracket cukai anda untuk pengiraan penjimatan yang tepat."
+                ),
+                message_en=(
+                    "Set your tax bracket for accurate savings calculations."
+                ),
+                action_href="/settings",
+                expires_at=None,
+            ),
+        ]
+
+    def _year_end_reminder(
+        self,
+        *,
+        tax_year: int,
+        today: date,
+    ) -> list[ReminderCandidate]:
+        if today.month < 11:
+            return []
+        return [
+            ReminderCandidate(
+                reminder_key=f"year_end_{tax_year}",
+                type="year_end",
+                severity="warning",
+                title_my=f"Tahun cukai {tax_year} akan berakhir",
+                title_en=f"Tax year {tax_year} is ending",
+                message_my=(
+                    f"Pastikan semua resit dimuat naik sebelum 31 Disember {tax_year}."
+                ),
+                message_en=(
+                    f"Make sure all receipts are uploaded before 31 December {tax_year}."
+                ),
+                action_href="/receipts",
+                expires_at=None,
+            ),
+        ]
 
     def _year_end_zero_category_reminders(
         self,
@@ -220,6 +330,7 @@ class ReminderEngine:
 
         total, _by_month = await self._receipts.sum_claimed_this_month(
             user_id=user.id,
+            org_id=None,
             tax_year=tax_year,
             month_start=month_start,
             month_end=month_end,
@@ -337,13 +448,19 @@ class ReminderEngine:
 
         total, by_month = await self._receipts.sum_claimed_this_month(
             user_id=user.id,
+            org_id=None,
             tax_year=tax_year,
             month_start=month_start,
             month_end=month_end,
         )
 
         limits = await self._limits.list_active()
-        summaries = await self._claims.list_for_user(user_id=user.id, tax_year=tax_year)
+        summaries = await self._claims.list_for_user(
+            user_id=user.id,
+            tax_year=tax_year,
+            context_type="individual",
+            org_id=None,
+        )
         summary_by_category = {item.category: item for item in summaries}
 
         lines_my: list[str] = [

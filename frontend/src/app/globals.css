@@ -49,6 +49,14 @@
 }
 
 :root {
+  --marketing-primary: oklch(0.32 0.07 215);
+  --marketing-primary-foreground: oklch(0.99 0 0);
+  --marketing-accent: oklch(0.62 0.19 155);
+  --marketing-accent-foreground: oklch(0.99 0 0);
+  --marketing-muted: oklch(0.97 0.01 215);
+  --marketing-muted-foreground: oklch(0.45 0.03 215);
+  --marketing-border: oklch(0.91 0.02 215);
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -125,6 +133,6 @@
     @apply bg-background text-foreground;
   }
   html {
-    @apply font-sans;
+    @apply font-sans scroll-smooth;
   }
 }

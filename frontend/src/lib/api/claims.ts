@@ -49,4 +49,10 @@ export async function fetchCompletenessScore(taxYear?: number) {
   });
 }
 
+export const getClaimSummary = fetchClaimSummary;
+export const getYearComparison = fetchClaimComparison;
+export const getReadyToFile = fetchReadyToFile;
+export const getCompletenessScore = fetchCompletenessScore;
+
+export { exportZip } from "@/lib/types/claims";
 export { getExportZipUrl } from "@/lib/api/export-urls";

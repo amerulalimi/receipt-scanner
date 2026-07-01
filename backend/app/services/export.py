@@ -1,36 +1,77 @@
 from __future__ import annotations
 
-import csv
 import io
+import re
 import uuid
 import zipfile
-from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.deps import UserInSession
 from app.core.exceptions import AppError
 from app.models.receipt import Receipt
 from app.models.user import User
+from app.repositories.claim_summary import ClaimSummaryRepository
+from app.repositories.organisation import OrganisationRepository
 from app.repositories.receipt import ReceiptRepository
+from app.repositories.relief_limit import ReliefLimitRepository
 from app.services.storage import get_receipt_storage
 
 PAYROLL_TEMPLATES = frozenset({"generic", "sql_payroll", "kakitangan"})
+
+
+def _sanitize_folder_name(label: str) -> str:
+    cleaned = re.sub(r"[^\w\s-]", "", label, flags=re.UNICODE)
+    cleaned = re.sub(r"\s+", "_", cleaned.strip())
+    return cleaned or "Lain_lain"
+
+
+def _sanitize_user_name(name: str | None) -> str:
+    if not name or not name.strip():
+        return "Pengguna"
+    cleaned = re.sub(r"[^\w\s-]", "", name.strip(), flags=re.UNICODE)
+    cleaned = re.sub(r"\s+", "_", cleaned)
+    return cleaned[:40] or "Pengguna"
+
+
+def _sanitize_org_name(name: str | None) -> str:
+    if not name or not name.strip():
+        return "ABC"
+    cleaned = re.sub(r"[^\w\s-]", "", name.strip(), flags=re.UNICODE)
+    cleaned = re.sub(r"\s+", "", cleaned)
+    return cleaned[:40] or "ABC"
+
+
+def _receipt_archive_name(receipt: Receipt) -> str:
+    merchant = receipt.merchant_name or "Resit"
+    merchant = re.sub(r"[^\w\s-]", "", merchant, flags=re.UNICODE)
+    merchant = re.sub(r"\s+", "_", merchant.strip()) or "Resit"
+    date_part = str(receipt.receipt_date or receipt.created_at.date())
+    ext = receipt.file_type or "jpg"
+    return f"{merchant}_{date_part}.{ext}"
 
 
 class ExportService:
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
         self._receipts = ReceiptRepository(db)
+        self._claims = ClaimSummaryRepository(db)
+        self._limits = ReliefLimitRepository(db)
 
     async def build_receipts_zip(
         self,
         user: User,
+        session: UserInSession,
         *,
         tax_year: int,
     ) -> tuple[bytes, str]:
-        items = await self._list_approved_for_user(user.id, tax_year)
+        items = await self._list_approved_for_user(
+            user.id,
+            tax_year,
+            session.org_id if session.active_context == "corporate" else None,
+        )
         if not items:
             raise AppError(
                 message="Tiada resit diluluskan untuk dieksport.",
@@ -38,33 +79,61 @@ class ExportService:
                 status_code=404,
             )
 
+        active_limits = await self._limits.list_active()
+        folder_by_category = {
+            limit.category: _sanitize_folder_name(
+                limit.description_my or limit.category.replace("_", " ").title(),
+            )
+            for limit in active_limits
+        }
+
         storage = get_receipt_storage()
         buffer = io.BytesIO()
-        manifest_rows: list[dict[str, str]] = []
+        category_totals: dict[str, Decimal] = {}
 
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             for receipt in items:
                 content = storage.read_receipt_file(receipt.image_key)
                 if content is None:
                     continue
-                ext = receipt.file_type or "jpg"
-                filename = receipt.file_name or f"{receipt.id}.{ext}"
-                archive.writestr(f"receipts/{filename}", content)
-                manifest_rows.append(
-                    {
-                        "receipt_id": str(receipt.id),
-                        "merchant": receipt.merchant_name or "",
-                        "receipt_date": str(receipt.receipt_date or ""),
-                        "category": receipt.category or "",
-                        "claimed_amount": str(receipt.claimed_amount or "0"),
-                        "status": receipt.status,
-                    },
-                )
 
-            manifest_csv = self._rows_to_csv(manifest_rows)
-            archive.writestr("manifest.csv", manifest_csv)
+                category = receipt.category or "lain"
+                folder = folder_by_category.get(category, _sanitize_folder_name(category))
+                filename = _receipt_archive_name(receipt)
+                archive.writestr(f"{folder}/{filename}", content)
 
-        filename = f"resit-{tax_year}-{user.id.hex[:8]}.zip"
+                amount = receipt.claimed_amount or Decimal("0")
+                category_totals[category] = category_totals.get(category, Decimal("0")) + amount
+
+            summary_lines = [
+                f"Ringkasan Tuntutan Cukai Pendapatan — Tahun {tax_year}",
+                f"Nama: {user.full_name or user.email}",
+                "",
+            ]
+            grand_total = Decimal("0")
+            for limit in active_limits:
+                total = category_totals.get(limit.category, Decimal("0"))
+                if total <= 0:
+                    continue
+                label = limit.description_my or limit.category
+                summary_lines.append(f"{label}: RM {total:.2f}")
+                grand_total += total
+
+            summary_lines.extend(
+                [
+                    "",
+                    f"Jumlah Keseluruhan: RM {grand_total:.2f}",
+                    "",
+                    "Dijana oleh Resit.my — simpan resit asal/digital selama 7 tahun.",
+                ],
+            )
+            archive.writestr(
+                f"Ringkasan_Tuntutan_{tax_year}.txt",
+                "\n".join(summary_lines),
+            )
+
+        sanitized_name = _sanitize_user_name(user.full_name)
+        filename = f"ResitCukai_BE_{tax_year}_{sanitized_name}.zip"
         return buffer.getvalue(), filename
 
     async def build_org_payroll_csv(
@@ -88,6 +157,8 @@ class ExportService:
                 code="NOT_FOUND",
                 status_code=404,
             )
+
+        import csv
 
         csv_rows: list[dict[str, str]] = []
         for receipt, employee, reviewer in rows:
@@ -149,22 +220,30 @@ class ExportService:
         else:
             content = self._rows_to_csv(csv_rows)
 
-        filename = f"payroll-claims-{tax_year}-{template}.csv"
+        org = await OrganisationRepository(self._db).get_by_id(org_id)
+        org_label = _sanitize_org_name(org.name if org else None)
+        filename = f"Syarikat{org_label}_BE_{tax_year}_payroll.csv"
         return content, filename
 
     async def _list_approved_for_user(
         self,
         user_id: uuid.UUID,
         tax_year: int,
+        org_id: uuid.UUID | None,
     ) -> list[Receipt]:
+        conditions = [
+            Receipt.user_id == user_id,
+            Receipt.tax_year == tax_year,
+            Receipt.status == "approved",
+            Receipt.deleted_at.is_(None),
+        ]
+        if org_id is None:
+            conditions.append(Receipt.org_id.is_(None))
+        else:
+            conditions.append(Receipt.org_id == org_id)
         result = await self._db.execute(
             select(Receipt)
-            .where(
-                Receipt.user_id == user_id,
-                Receipt.tax_year == tax_year,
-                Receipt.status == "approved",
-                Receipt.deleted_at.is_(None),
-            )
+            .where(*conditions)
             .order_by(desc(Receipt.receipt_date), desc(Receipt.created_at)),
         )
         return list(result.scalars().all())
@@ -197,6 +276,8 @@ class ExportService:
         *,
         fieldnames: list[str] | None = None,
     ) -> str:
+        import csv
+
         if not rows:
             return ""
         columns = fieldnames or list(rows[0].keys())

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUserDep, get_db
+from app.core.deps import CurrentSessionDep, CurrentUserDep, get_db
 from app.schemas.claims import (
     ClaimCompareData,
     ClaimSummaryData,
@@ -37,51 +37,57 @@ def _engagement_service(db: AsyncSession = Depends(get_db)) -> EngagementService
 @router.get("/summary", response_model=ApiResponse[ClaimSummaryData])
 async def get_claim_summary(
     current_user: CurrentUserDep,
+    current_session: CurrentSessionDep,
     tax_year: int | None = Query(default=None, ge=2000, le=2100),
     service: ClaimsService = Depends(_claims_service),
 ) -> ApiResponse[ClaimSummaryData]:
-    data = await service.get_summary(current_user, tax_year=tax_year)
+    data = await service.get_summary(current_user, current_session, tax_year=tax_year)
     return ApiResponse(success=True, data=data, message=None)
 
 
 @router.get("/compare", response_model=ApiResponse[ClaimCompareData])
 async def get_claim_comparison(
     current_user: CurrentUserDep,
+    current_session: CurrentSessionDep,
     tax_year: int | None = Query(default=None, ge=2000, le=2100),
     service: ClaimsService = Depends(_claims_service),
 ) -> ApiResponse[ClaimCompareData]:
-    data = await service.get_comparison(current_user, tax_year=tax_year)
+    data = await service.get_comparison(current_user, current_session, tax_year=tax_year)
     return ApiResponse(success=True, data=data, message=None)
 
 
 @router.get("/ready-to-file", response_model=ApiResponse[ReadyToFileData])
 async def get_ready_to_file(
     current_user: CurrentUserDep,
+    current_session: CurrentSessionDep,
     tax_year: int | None = Query(default=None, ge=2000, le=2100),
     service: BorangBeService = Depends(_borang_be_service),
 ) -> ApiResponse[ReadyToFileData]:
-    data = await service.get_ready_to_file(current_user, tax_year=tax_year)
+    data = await service.get_ready_to_file(current_user, current_session, tax_year=tax_year)
     return ApiResponse(success=True, data=data, message=None)
 
 
 @router.get("/completeness", response_model=ApiResponse[CompletenessScoreData])
 async def get_completeness_score(
     current_user: CurrentUserDep,
+    current_session: CurrentSessionDep,
     tax_year: int | None = Query(default=None, ge=2000, le=2100),
     service: EngagementService = Depends(_engagement_service),
 ) -> ApiResponse[CompletenessScoreData]:
-    data = await service.get_completeness_score(current_user, tax_year=tax_year)
+    data = await service.get_completeness_score(current_user, current_session, tax_year=tax_year)
     return ApiResponse(success=True, data=data, message=None)
 
 
 @router.get("/export-zip")
 async def export_receipts_zip(
     current_user: CurrentUserDep,
+    current_session: CurrentSessionDep,
     tax_year: int = Query(ge=2000, le=2100),
     service: ExportService = Depends(_export_service),
 ) -> Response:
     content, filename = await service.build_receipts_zip(
         current_user,
+        current_session,
         tax_year=tax_year,
     )
     return Response(

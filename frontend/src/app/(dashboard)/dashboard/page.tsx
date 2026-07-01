@@ -51,7 +51,7 @@ export default async function DashboardPage({
   const parsedHistory = parseDashboardReceiptHistorySearchParams(rawParams);
   const historyLimit = parsedHistory.success
     ? parsedHistory.data.history_limit
-    : 10;
+    : 5;
 
   const locale = await getLocale();
   const dictionary = await getDictionary(locale);
@@ -181,6 +181,7 @@ export default async function DashboardPage({
 
       <ClaimSummarySection
         summary={body.data}
+        completeness={completenessData}
         categoryLabels={categoryLabels}
         locale={locale}
       />

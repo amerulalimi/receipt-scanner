@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Camera, CheckCircle2, Clock, Upload } from "lucide-react";
+import { Camera, CheckCircle2, Clock } from "lucide-react";
 import {
   startTransition,
   useActionState,
@@ -17,8 +17,10 @@ import {
   mobileCloseSessionAction,
   mobileKeepAliveAction,
   mobileUploadAction,
+  mobileValidateSessionAction,
 } from "@/actions/upload-session";
 import { initialMobileUploadState } from "@/actions/upload-session.types";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -28,6 +30,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import type { UploadSessionValidateData } from "@/lib/api/types";
 import { formatCountdown } from "@/lib/upload-session-utils";
 import {
@@ -39,6 +42,8 @@ type MobileUploadSessionProps = {
   token: string;
   initialData: UploadSessionValidateData;
 };
+
+const POLL_INTERVAL_MS = 30_000;
 
 export function MobileUploadSession({
   token,
@@ -53,6 +58,7 @@ export function MobileUploadSession({
   const [isDone, setIsDone] = useState(false);
   const [doneMessage, setDoneMessage] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [showUploadAgain, setShowUploadAgain] = useState(false);
   const [isKeepingAlive, startKeepAlive] = useTransition();
   const [isClosing, startClose] = useTransition();
 
@@ -65,6 +71,19 @@ export function MobileUploadSession({
     resolver: zodResolver(receiptUploadSchema),
     defaultValues: {},
   });
+
+  const pollSession = useCallback(async () => {
+    const result = await mobileValidateSessionAction(token);
+    if (result.error) {
+      setIsExpired(true);
+      return;
+    }
+    if (result.valid) {
+      setUploadsCount(result.uploadsSoFar);
+      setRemainingSeconds(result.inactivityRemaining);
+      setIsExpired(false);
+    }
+  }, [token]);
 
   useEffect(() => {
     if (remainingSeconds <= 0) {
@@ -84,6 +103,14 @@ export function MobileUploadSession({
 
     return () => window.clearInterval(timer);
   }, [remainingSeconds]);
+
+  useEffect(() => {
+    const pollTimer = window.setInterval(() => {
+      void pollSession();
+    }, POLL_INTERVAL_MS);
+
+    return () => window.clearInterval(pollTimer);
+  }, [pollSession]);
 
   useEffect(() => {
     if (!state.fieldErrors) {
@@ -112,6 +139,7 @@ export function MobileUploadSession({
 
     setLocalError(null);
     setUploadsCount((count) => count + 1);
+    setShowUploadAgain(true);
     if (state.inactivityRemaining !== undefined) {
       setRemainingSeconds(state.inactivityRemaining);
       setIsExpired(false);
@@ -124,6 +152,7 @@ export function MobileUploadSession({
   }, [state.success, state.inactivityRemaining, form]);
 
   const openCamera = useCallback(() => {
+    setShowUploadAgain(false);
     fileInputRef.current?.click();
   }, []);
 
@@ -141,7 +170,7 @@ export function MobileUploadSession({
     startKeepAlive(async () => {
       const result = await mobileKeepAliveAction(token);
       if (result.error || result.inactivityRemaining === undefined) {
-        setLocalError(result.error ?? "Unable to keep session alive.");
+        setLocalError(result.error ?? "Tidak dapat kekalkan sesi.");
         return;
       }
       setRemainingSeconds(result.inactivityRemaining);
@@ -158,7 +187,7 @@ export function MobileUploadSession({
         result.uploadsCount === undefined ||
         result.message === undefined
       ) {
-        setLocalError(result.error ?? "Unable to close session.");
+        setLocalError(result.error ?? "Tidak dapat menutup sesi.");
         return;
       }
       setIsDone(true);
@@ -171,12 +200,12 @@ export function MobileUploadSession({
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 px-4 py-8">
         <CheckCircle2 className="size-16 text-primary" aria-hidden />
-        <h1 className="text-center text-2xl font-semibold">Done!</h1>
+        <h1 className="text-center text-2xl font-semibold">Terima kasih!</h1>
         <p className="text-center text-muted-foreground">
-          {doneMessage ?? "Continue on your desktop."}
+          {doneMessage ?? "Sambung di desktop anda."}
         </p>
         <p className="text-sm text-muted-foreground">
-          {uploadsCount} receipt(s) uploaded in this session.
+          {uploadsCount} resit dimuat naik
         </p>
       </main>
     );
@@ -186,65 +215,85 @@ export function MobileUploadSession({
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 px-4 py-8 text-center">
         <Clock className="size-12 text-muted-foreground" aria-hidden />
-        <h1 className="text-xl font-semibold">Session expired</h1>
+        <h1 className="text-xl font-semibold">Sesi tamat</h1>
         <p className="text-muted-foreground">
-          Scan a new QR code on your desktop to continue uploading.
+          Sila imbas QR baru di desktop anda.
         </p>
       </main>
     );
   }
 
   const isWarning = remainingSeconds <= 120;
+  const progressValue = Math.min(
+    100,
+    Math.max(0, (remainingSeconds / initialData.inactivity_remaining) * 100),
+  );
 
   return (
     <main className="mx-auto min-h-dvh max-w-md px-4 py-6">
       <header className="mb-6 space-y-1 text-center">
-        <p className="text-sm text-muted-foreground">Uploading for</p>
+        <p className="text-sm text-muted-foreground">Muat naik untuk</p>
         <h1 className="text-2xl font-semibold">{initialData.user_name}</h1>
       </header>
 
+      {isWarning ? (
+        <Alert className="mb-4 border-amber-500/40 bg-amber-500/10">
+          <AlertTitle>Sesi akan tamat</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>Sesi akan tamat dalam {formatCountdown(remainingSeconds)}.</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isKeepingAlive}
+              onClick={handleKeepAlive}
+            >
+              {isKeepingAlive ? "..." : "Kekalkan Aktif"}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <Card>
         <CardHeader className="text-center">
-          <CardTitle>Capture Receipt</CardTitle>
+          <CardTitle>Muat Naik Resit</CardTitle>
           <CardDescription>
-            Open the camera and take a photo of your receipt.
+            Ambil gambar resit anda menggunakan kamera telefon.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3 text-sm">
-            <span className="text-muted-foreground">Receipts uploaded</span>
-            <span className="font-semibold">{uploadsCount}</span>
+            <span className="text-muted-foreground">Resit dimuat naik</span>
+            <span className="font-semibold">{uploadsCount} resit dimuat naik</span>
           </div>
 
-          <div
-            className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm ${
-              isWarning
-                ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                : "bg-muted/30"
-            }`}
-          >
-            <span>Time remaining</span>
-            <span className="font-mono font-semibold">
-              {formatCountdown(remainingSeconds)}
-            </span>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Masa berbaki</span>
+              <span className="font-mono font-semibold">
+                {formatCountdown(remainingSeconds)}
+              </span>
+            </div>
+            <Progress value={progressValue} />
           </div>
 
           {localError ? (
-            <p
-              role="alert"
-              className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-            >
-              {localError}
-            </p>
+            <Alert variant="destructive">
+              <AlertDescription>{localError}</AlertDescription>
+            </Alert>
           ) : null}
 
           {state.success && state.message ? (
-            <p
-              role="status"
-              className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm"
-            >
-              {state.message}
-            </p>
+            <Alert>
+              <AlertDescription className="space-y-3">
+                <p>{state.message}</p>
+                {showUploadAgain ? (
+                  <Button type="button" variant="outline" onClick={openCamera}>
+                    Muat naik lagi?
+                  </Button>
+                ) : null}
+              </AlertDescription>
+            </Alert>
           ) : null}
 
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -290,7 +339,7 @@ export function MobileUploadSession({
               onClick={openCamera}
             >
               <Camera className="size-5" aria-hidden />
-              {isPending ? "Uploading…" : "Open camera"}
+              {isPending ? "Memuat naik…" : "Ambil Gambar"}
             </Button>
           </form>
 
@@ -301,8 +350,7 @@ export function MobileUploadSession({
               disabled={isKeepingAlive || isPending}
               onClick={handleKeepAlive}
             >
-              <Upload className="size-4" aria-hidden />
-              {isKeepingAlive ? "..." : "Keep alive"}
+              {isKeepingAlive ? "..." : "Kekalkan Aktif"}
             </Button>
             <Button
               type="button"
@@ -310,7 +358,7 @@ export function MobileUploadSession({
               disabled={isClosing || isPending}
               onClick={handleDone}
             >
-              {isClosing ? "..." : "Done"}
+              {isClosing ? "..." : "Selesai"}
             </Button>
           </div>
         </CardContent>

@@ -166,6 +166,7 @@ class ReceiptUploadFileError(BaseModel):
 
 class ReceiptUploadResponse(BaseModel):
     job_ids: list[uuid.UUID]
+    receipt_ids: list[uuid.UUID] = Field(default_factory=list)
     message: str
     errors: list[ReceiptUploadFileError] = Field(default_factory=list)
 

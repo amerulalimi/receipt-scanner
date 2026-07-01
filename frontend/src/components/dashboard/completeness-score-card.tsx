@@ -9,10 +9,34 @@ import type { CompletenessScoreData } from "@/lib/api/types";
 import { getCurrencyFormatter, getDictionary } from "@/lib/i18n/get-dictionary";
 import { createServerTranslator } from "@/lib/i18n/translate";
 import type { Locale } from "@/lib/i18n/locales";
+import { cn } from "@/lib/utils";
 
 type CompletenessScoreCardProps = {
   score: CompletenessScoreData;
   locale: Locale;
+};
+
+const CRITERION_LABELS: Record<string, { en: string; ms: string }> = {
+  approved_receipt: {
+    en: "At least 1 approved receipt",
+    ms: "Sekurang-kurangnya 1 resit diluluskan",
+  },
+  multi_category: {
+    en: "Claims in 3+ categories",
+    ms: "Tuntutan dalam 3+ kategori",
+  },
+  total_claimed_1000: {
+    en: "Total claimed over RM1,000",
+    ms: "Jumlah tuntutan melebihi RM1,000",
+  },
+  category_utilization_50: {
+    en: "Any category at 50%+ of limit",
+    ms: "Mana-mana kategori ≥50% had",
+  },
+  profile_complete: {
+    en: "Profile complete (name + tax bracket)",
+    ms: "Profil lengkap (nama + kadar cukai)",
+  },
 };
 
 function getScoreTone(score: number): string {
@@ -35,6 +59,7 @@ export async function CompletenessScoreCard({
 
   const claimedTotal = Number(score.total_claimed);
   const savingsTotal = Number(score.estimated_savings);
+  const breakdown = score.breakdown ?? [];
 
   return (
     <Card>
@@ -48,7 +73,7 @@ export async function CompletenessScoreCard({
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className={`text-4xl font-semibold tabular-nums ${getScoreTone(score.score)}`}>
-              {score.score}%
+              {score.score}/100
             </p>
             <p className="text-sm text-muted-foreground">
               {t("completeness", "categoriesTracked", {
@@ -82,6 +107,52 @@ export async function CompletenessScoreCard({
           <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
             {score.milestone_message}
           </p>
+        ) : null}
+
+        {score.next_action ? (
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">
+              {t("completeness", "nextAction")}:
+            </span>{" "}
+            {score.next_action}
+          </p>
+        ) : null}
+
+        {breakdown.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-sm font-medium">{t("completeness", "breakdownTitle")}</p>
+            <ul className="space-y-2">
+              {breakdown.map((item) => {
+                const label =
+                  CRITERION_LABELS[item.criterion]?.[locale] ??
+                  item.criterion;
+                return (
+                  <li
+                    key={item.criterion}
+                    className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm"
+                  >
+                    <span className={cn(!item.achieved && "text-muted-foreground")}>
+                      {label}
+                    </span>
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-xs font-medium",
+                        item.achieved
+                          ? "bg-primary/10 text-primary"
+                          : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {item.achieved
+                        ? t("completeness", "criterionAchieved", {
+                            points: item.points,
+                          })
+                        : t("completeness", "criterionPending")}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         ) : null}
       </CardContent>
     </Card>

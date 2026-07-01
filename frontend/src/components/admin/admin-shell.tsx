@@ -30,7 +30,7 @@ export function AdminShell({ children, userName, userEmail }: AdminShellProps) {
           </span>
         </header>
         <div className="flex min-h-[calc(100svh-3.5rem)] flex-1 flex-col items-center px-4 sm:px-6">
-          <div className="w-full max-w-4xl flex-1 py-8">{children}</div>
+          <div className="w-full max-w-6xl flex-1 py-8">{children}</div>
         </div>
       </SidebarInset>
     </SidebarProvider>

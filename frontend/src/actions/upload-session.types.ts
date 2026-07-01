@@ -23,3 +23,12 @@ export type MobileKeepAliveResult =
 export type MobileCloseSessionResult =
   | { uploadsCount: number; message: string; error?: undefined }
   | { error: string; uploadsCount?: undefined; message?: undefined };
+
+export type MobileValidateResult =
+  | {
+      valid: true;
+      uploadsSoFar: number;
+      inactivityRemaining: number;
+      error?: undefined;
+    }
+  | { error: string; valid?: undefined };

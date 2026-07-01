@@ -5,6 +5,7 @@ from app.models.invite_token import InviteToken
 from app.models.org_policy import OrgPolicy
 from app.models.notification_preference import NotificationPreference
 from app.models.organisation import Organisation
+from app.models.platform_admin import PlatformAdmin
 from app.models.receipt import Receipt
 from app.models.receipt_flag import ReceiptFlag
 from app.models.receipt_line_item import ReceiptLineItem
@@ -24,6 +25,7 @@ __all__ = [
     "NotificationPreference",
     "OrgPolicy",
     "Organisation",
+    "PlatformAdmin",
     "Receipt",
     "ReceiptFlag",
     "ReceiptLineItem",

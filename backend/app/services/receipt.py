@@ -7,18 +7,26 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.deps import UserInSession
 from app.core.exceptions import AppError
+from app.core.file_validator import get_safe_filename, validate_file
 from app.core.storage import (
+    build_receipt_download_url,
     build_receipt_file_url,
     build_receipt_thumbnail_url,
-    build_receipt_download_url,
     MIME_BY_FILE_TYPE,
 )
-from app.services.storage import get_receipt_storage
+from app.services.storage import (
+    build_receipt_storage_key,
+    get_receipt_storage,
+    get_storage,
+    save_receipt_via_legacy_local,
+)
 from app.models.receipt import Receipt
 from app.models.receipt_flag import ReceiptFlag
 from app.models.user import User
 from app.repositories.claim_summary import ClaimSummaryRepository
+from app.repositories.org_policy import OrgPolicyRepository
 from app.repositories.receipt import ReceiptRepository
 from app.repositories.receipt_line_item import ReceiptLineItemRepository
 from app.schemas.receipt import (
@@ -38,7 +46,8 @@ from app.schemas.receipt import (
     ReliefStatusInfo,
 )
 from app.services.claim_limit import ClaimLimitService, NON_CLAIMABLE_CATEGORIES, ReliefCheckResult
-from app.services.job_queue import enqueue_receipt_job, is_processing_enabled
+from app.services.dedup import check_duplicate, compute_hash, derive_duplicate_image_hash
+from app.services.job_queue import enqueue_receipt_job
 from app.services.line_item_claims import (
     category_amounts_from_line_items,
     sync_receipt_header_from_line_items,
@@ -52,7 +61,6 @@ class ReceiptService:
     ALLOWED_UPLOAD_MIME = {
         "image/jpeg": "jpg",
         "image/png": "png",
-        "image/webp": "webp",
         "application/pdf": "pdf",
     }
 
@@ -63,9 +71,18 @@ class ReceiptService:
         self._claims = ClaimSummaryRepository(db)
         self._limits = ClaimLimitService(db)
 
+    @staticmethod
+    def _context_type(session: UserInSession) -> str:
+        return "corporate" if session.active_context == "corporate" and session.org_id is not None else "individual"
+
+    @classmethod
+    def _active_org_id(cls, session: UserInSession) -> uuid.UUID | None:
+        return session.org_id if cls._context_type(session) == "corporate" else None
+
     async def list_receipts(
         self,
         user: User,
+        session: UserInSession,
         *,
         tax_year: int | None,
         category: str | None,
@@ -77,6 +94,7 @@ class ReceiptService:
         sort_field, sort_order = self._parse_sort(sort)
         items, total = await self._receipts.list_for_user(
             user_id=user.id,
+            org_id=self._active_org_id(session),
             tax_year=tax_year,
             category=category,
             status=status,
@@ -93,19 +111,21 @@ class ReceiptService:
             limit=limit,
         )
 
-    async def get_receipt(self, user: User, receipt_id: uuid.UUID) -> ReceiptDetail:
+    async def get_receipt(self, user: User, session: UserInSession, receipt_id: uuid.UUID) -> ReceiptDetail:
         receipt = await self._get_owned_receipt(
             user.id,
+            self._active_org_id(session),
             receipt_id,
             include_flags=True,
             include_line_items=True,
         )
-        relief_status = await self._build_relief_status_for_receipt(user, receipt)
+        relief_status = await self._build_relief_status_for_receipt(user, session, receipt)
         return self._to_detail(receipt, relief_status=relief_status)
 
     async def create_receipt(
         self,
         user: User,
+        session: UserInSession,
         payload: ReceiptCreateRequest,
     ) -> ReceiptCreateResponse:
         existing = await self._receipts.get_by_image_hash(payload.image_hash)
@@ -128,6 +148,8 @@ class ReceiptService:
                 tax_year=tax_year,
                 category=payload.category,
                 new_claimed_amount=claimed_amount,
+                context_type=self._context_type(session),
+                org_id=self._active_org_id(session),
             )
         else:
             check = ReliefCheckResult(
@@ -153,7 +175,7 @@ class ReceiptService:
 
         receipt = Receipt(
             user_id=user.id,
-            org_id=user.org_id,
+            org_id=self._active_org_id(session),
             tax_year=tax_year,
             image_key=payload.image_key,
             image_hash=payload.image_hash,
@@ -193,6 +215,7 @@ class ReceiptService:
     async def upload_receipt(
         self,
         user: User,
+        session: UserInSession,
         *,
         filename: str | None,
         content_type: str | None,
@@ -201,8 +224,9 @@ class ReceiptService:
         tax_year: int | None = None,
         redis: Redis | None = None,
     ) -> ReceiptUploadResponse:
-        receipt_id = await self._create_receipt_from_upload(
+        receipt_id, job_id = await self._create_receipt_from_upload(
             user,
+            session,
             filename=filename,
             content_type=content_type,
             content=content,
@@ -211,13 +235,15 @@ class ReceiptService:
             redis=redis,
         )
         return ReceiptUploadResponse(
-            job_ids=[receipt_id],
+            job_ids=[job_id],
+            receipt_ids=[receipt_id],
             message="1 resit sedang diproses",
         )
 
     async def upload_receipts(
         self,
         user: User,
+        session: UserInSession,
         *,
         uploads: list[tuple[str | None, str | None, bytes]],
         tax_year: int | None = None,
@@ -238,19 +264,22 @@ class ReceiptService:
             )
 
         job_ids: list[uuid.UUID] = []
+        receipt_ids: list[uuid.UUID] = []
         errors: list[ReceiptUploadFileError] = []
 
         for filename, content_type, content in uploads:
             try:
-                receipt_id = await self._create_receipt_from_upload(
+                receipt_id, job_id = await self._create_receipt_from_upload(
                     user,
+                    session,
                     filename=filename,
                     content_type=content_type,
                     content=content,
                     tax_year=tax_year,
                     redis=redis,
                 )
-                job_ids.append(receipt_id)
+                job_ids.append(job_id)
+                receipt_ids.append(receipt_id)
             except AppError as exc:
                 errors.append(
                     ReceiptUploadFileError(
@@ -283,6 +312,7 @@ class ReceiptService:
 
         return ReceiptUploadResponse(
             job_ids=job_ids,
+            receipt_ids=receipt_ids,
             message=message,
             errors=errors,
         )
@@ -290,6 +320,7 @@ class ReceiptService:
     async def _create_receipt_from_upload(
         self,
         user: User,
+        session: UserInSession,
         *,
         filename: str | None,
         content_type: str | None,
@@ -297,7 +328,7 @@ class ReceiptService:
         upload_session_token: str | None = None,
         tax_year: int | None = None,
         redis: Redis | None = None,
-    ) -> uuid.UUID:
+    ) -> tuple[uuid.UUID, uuid.UUID]:
         if not content:
             raise AppError(
                 message="Fail kosong.",
@@ -314,59 +345,138 @@ class ReceiptService:
 
         if content_type not in self.ALLOWED_UPLOAD_MIME:
             raise AppError(
-                message="Jenis fail tidak disokong. Gunakan JPG, PNG, WEBP, atau PDF.",
+                message="Jenis fail tidak disokong. Gunakan JPG, PNG, atau PDF.",
                 code="VALIDATION_ERROR",
                 status_code=422,
             )
 
-        image_hash = hashlib.sha256(content).hexdigest()
-        existing = await self._receipts.get_by_image_hash(image_hash)
-        if existing is not None:
+        if not validate_file(content, filename or "upload", content_type or ""):
             raise AppError(
-                message=(
-                    "Resit dengan imej yang sama sudah wujud. "
-                    "Lihat senarai resit terkini di dashboard."
-                ),
-                code="DUPLICATE_RECEIPT",
-                status_code=409,
+                message="Kandungan fail tidak sepadan dengan jenis fail yang diisytiharkan.",
+                code="VALIDATION_ERROR",
+                status_code=422,
             )
 
+        safe_filename = get_safe_filename(filename or "upload")
+
+        if redis is None:
+            raise AppError(
+                message="Redis tidak tersedia untuk pemprosesan resit.",
+                code="INTERNAL_ERROR",
+                status_code=500,
+            )
+
+        await self._enforce_org_monthly_upload_limit(user, session)
+
         file_ext = self.ALLOWED_UPLOAD_MIME[content_type]
-        storage = get_receipt_storage()
-        image_key = storage.save_receipt_file(
-            user_id=str(user.id),
-            content=content,
-            file_ext=file_ext,
-        )
+        normalized_type = file_ext.lower().lstrip(".")
+        content_hash = await compute_hash(content)
+        existing = await check_duplicate(self._db, content_hash, user.id)
+
+        if existing is not None:
+            duplicate = await self._create_duplicate_receipt(
+                user,
+                session,
+                filename=filename,
+                file_type=normalized_type,
+                file_size=len(content),
+                content_hash=content_hash,
+                original=existing,
+                tax_year=tax_year or user.tax_year,
+            )
+            return duplicate.id, duplicate.id
+
+        backend_name = settings.storage_backend.strip().lower()
+        if backend_name in {"s3", "r2"}:
+            storage_key = build_receipt_storage_key(user.id, normalized_type)
+            mime = MIME_BY_FILE_TYPE.get(normalized_type, "application/octet-stream")
+            active_storage = get_storage()
+            storage_key = await active_storage.upload_file(content, storage_key, mime)
+        else:
+            storage_key = save_receipt_via_legacy_local(
+                user_id=str(user.id),
+                content=content,
+                file_ext=normalized_type,
+            )
 
         receipt = Receipt(
             user_id=user.id,
-            org_id=user.org_id,
+            org_id=self._active_org_id(session),
             tax_year=tax_year or user.tax_year,
-            image_key=image_key,
-            image_hash=image_hash,
-            file_name=filename,
-            file_type=file_ext,
+            image_key=storage_key,
+            image_hash=content_hash,
+            file_name=safe_filename,
+            file_type=normalized_type,
             file_size_bytes=len(content),
-            category="semak_manual",
+            category="tidak_layak",
             status="pending",
             scan_status="waiting",
         )
-        receipt = await self._receipts.create(receipt)
+        receipt = await self._receipts.create_receipt(receipt)
+        await self._db.flush()
 
-        if redis is not None and await is_processing_enabled(self._db):
-            await enqueue_receipt_job(
-                redis,
-                receipt_id=receipt.id,
-                user_id=user.id,
-                upload_session_token=upload_session_token,
-            )
+        job_id_str = await enqueue_receipt_job(
+            redis,
+            receipt_id=receipt.id,
+            user_id=user.id,
+            upload_session_token=upload_session_token,
+        )
+        return receipt.id, uuid.UUID(job_id_str)
 
-        return receipt.id
+    async def _create_duplicate_receipt(
+        self,
+        user: User,
+        session: UserInSession,
+        *,
+        filename: str | None,
+        file_type: str,
+        file_size: int,
+        content_hash: str,
+        original: Receipt,
+        tax_year: int,
+    ) -> Receipt:
+        from io import BytesIO
+
+        from PIL import Image
+
+        placeholder = Image.new("RGB", (2, 2), color="white")
+        buffer = BytesIO()
+        placeholder.save(buffer, format="PNG")
+        tiny_png = buffer.getvalue()
+        placeholder_key = save_receipt_via_legacy_local(
+            user_id=str(user.id),
+            content=tiny_png,
+            file_ext="png",
+        )
+        receipt = Receipt(
+            user_id=user.id,
+            org_id=self._active_org_id(session),
+            tax_year=tax_year,
+            image_key=placeholder_key,
+            image_hash=derive_duplicate_image_hash(content_hash),
+            file_name=filename,
+            file_type=file_type,
+            file_size_bytes=file_size,
+            category=original.category,
+            status="duplicate",
+            scan_status="failed",
+            merchant_name=original.merchant_name,
+            total_amount=original.total_amount,
+            claimed_amount=original.claimed_amount,
+        )
+        receipt = await self._receipts.create_receipt(receipt)
+        await self._receipts.create_flag(
+            receipt.id,
+            "duplicate_suspected",
+            f"Duplikat resit asal: {original.id}",
+        )
+        await self._db.flush()
+        return receipt
 
     async def create_manual_receipt(
         self,
         user: User,
+        session: UserInSession,
         payload: ReceiptManualCreateRequest,
     ) -> ReceiptDetail:
         from io import BytesIO
@@ -394,7 +504,7 @@ class ReceiptService:
 
         receipt = Receipt(
             user_id=user.id,
-            org_id=user.org_id,
+            org_id=self._active_org_id(session),
             tax_year=tax_year,
             image_key=image_key,
             image_hash=image_hash,
@@ -413,53 +523,124 @@ class ReceiptService:
         )
         receipt.be_seksyen = await self._limits.get_be_seksyen(category=payload.category)
         receipt = await self._receipts.create(receipt)
-        relief_status = await self._build_relief_status_for_receipt(user, receipt)
-        return self._to_detail(receipt, relief_status=relief_status)
+
+        from app.services.rule_engine import apply_rules
+
+        rules = await apply_rules(
+            self._db,
+            user.id,
+            tax_year,
+            {
+                "category": payload.category,
+                "claimed_amount": claimed,
+                "ocr_confidence": 1.0,
+                "ai_confidence": 1.0,
+                "is_mixed": False,
+            },
+        )
+        receipt.claimed_amount = rules["claimed_amount"]
+        receipt.category = rules["category"]
+        receipt.be_seksyen = rules.get("be_seksyen") or receipt.be_seksyen
+        if rules["flags"]:
+            receipt.status = "flagged"
+            for flag_type in rules["flags"]:
+                await self._add_flag(receipt, flag_type=flag_type, message=None)
+
+        await self._db.flush()
+        loaded = await self._receipts.get_receipt_with_details(
+            receipt.id,
+            user.id,
+            self._active_org_id(session),
+        )
+        assert loaded is not None
+        relief_status = await self._build_relief_status_for_receipt(user, session, loaded)
+        return self._to_detail(loaded, relief_status=relief_status)
 
     async def reprocess_receipt(
         self,
         user: User,
+        session: UserInSession,
         receipt_id: uuid.UUID,
         *,
         redis: Redis,
     ) -> ReceiptDetail:
-        receipt = await self._get_owned_receipt(user.id, receipt_id, include_flags=True)
-        if receipt.file_type == "pdf":
+        del redis
+        receipt = await self._get_owned_receipt(
+            user.id,
+            self._active_org_id(session),
+            receipt_id,
+            include_flags=True,
+        )
+        storage = get_receipt_storage()
+        file_bytes = storage.read_receipt_file(receipt.image_key)
+        if file_bytes is None:
             raise AppError(
-                message="PDF tidak disokong untuk pemprosesan semula.",
-                code="VALIDATION_ERROR",
-                status_code=422,
+                message="Fail resit tidak dijumpai.",
+                code="NOT_FOUND",
+                status_code=404,
             )
 
-        receipt.scan_status = "waiting"
-        receipt.status = "pending"
-        await self._db.flush()
+        if receipt.file_type == "pdf":
+            from app.services.vision_llm import classify_receipt
 
-        if await is_processing_enabled(self._db):
-            await enqueue_receipt_job(
-                redis,
-                receipt_id=receipt.id,
-                user_id=user.id,
+            ai_result = await classify_receipt(file_bytes, "pdf", db=self._db)
+            receipt.scan_status = "failed"
+            receipt.status = "pending"
+            receipt.ai_nota = ai_result.get("ai_nota")
+            await self._db.flush()
+        else:
+            from app.services.vision_llm import classify_receipt
+            from app.services.rule_engine import apply_rules
+
+            ai_result = await classify_receipt(
+                file_bytes,
+                receipt.file_type or "jpg",
+                db=self._db,
             )
+            if ai_result.get("scan_status") == "failed":
+                receipt.scan_status = "failed"
+                receipt.status = "flagged"
+                receipt.ai_nota = ai_result.get("ai_nota")
+            else:
+                rules = await apply_rules(
+                    self._db,
+                    user.id,
+                    receipt.tax_year,
+                    ai_result,
+                )
+                receipt.merchant_name = ai_result.get("merchant_name")
+                receipt.receipt_date = ai_result.get("receipt_date")
+                receipt.total_amount = ai_result.get("total_amount")
+                receipt.category = rules["category"]
+                receipt.be_seksyen = rules.get("be_seksyen")
+                receipt.claimed_amount = rules["claimed_amount"]
+                receipt.ai_confidence = Decimal(str(rules.get("ai_confidence", 0)))
+                receipt.ocr_confidence = Decimal(str(rules.get("ocr_confidence", 0)))
+                receipt.ai_nota = rules.get("ai_nota")
+                receipt.scan_status = "success"
+                receipt.status = "flagged" if rules["flags"] else "pending"
+            await self._db.flush()
 
-        relief_status = await self._build_relief_status_for_receipt(user, receipt)
+        relief_status = await self._build_relief_status_for_receipt(user, session, receipt)
         return self._to_detail(receipt, relief_status=relief_status)
 
     async def update_receipt(
         self,
         user: User,
+        session: UserInSession,
         receipt_id: uuid.UUID,
         payload: ReceiptUpdateRequest,
     ) -> ReceiptDetail:
         receipt = await self._get_owned_receipt(
             user.id,
+            self._active_org_id(session),
             receipt_id,
             include_flags=True,
             include_line_items=True,
         )
 
         if payload.line_items is not None:
-            return await self._update_receipt_line_items(user, receipt, payload.line_items)
+            return await self._update_receipt_line_items(user, session, receipt, payload.line_items)
 
         if payload.notes is not None:
             receipt.notes = payload.notes
@@ -468,7 +649,7 @@ class ReceiptService:
             if payload.notes is not None:
                 await self._db.flush()
                 await self._db.refresh(receipt, attribute_names=["flags", "line_items"])
-            relief_status = await self._build_relief_status_for_receipt(user, receipt)
+            relief_status = await self._build_relief_status_for_receipt(user, session, receipt)
             return self._to_detail(receipt, relief_status=relief_status)
 
         new_category = payload.category or receipt.category
@@ -503,6 +684,8 @@ class ReceiptService:
                 tax_year=receipt.tax_year,
                 category=new_category,
                 new_claimed_amount=new_claimed,
+                context_type=self._context_type(session),
+                org_id=self._active_org_id(session),
                 exclude_receipt_id=exclude_id,
                 subtract_approved=subtract_approved,
             )
@@ -544,13 +727,15 @@ class ReceiptService:
 
         relief_status = check.relief_status if check else await self._build_relief_status_for_receipt(
             user,
+            session,
             receipt,
         )
         return self._to_detail(receipt, relief_status=relief_status)
 
-    async def delete_receipt(self, user: User, receipt_id: uuid.UUID) -> None:
+    async def delete_receipt(self, user: User, session: UserInSession, receipt_id: uuid.UUID) -> None:
         receipt = await self._get_owned_receipt(
             user.id,
+            self._active_org_id(session),
             receipt_id,
             include_line_items=True,
         )
@@ -563,10 +748,11 @@ class ReceiptService:
     async def review_receipt(
         self,
         reviewer: User,
+        reviewer_session: UserInSession,
         receipt_id: uuid.UUID,
         payload: ReceiptReviewRequest,
     ) -> ReceiptDetail:
-        receipt = await self._get_receipt_for_org_review(reviewer, receipt_id)
+        receipt = await self._get_receipt_for_org_review(reviewer_session, receipt_id)
 
         if receipt.status in ("approved", "rejected", "duplicate"):
             raise AppError(
@@ -602,16 +788,21 @@ class ReceiptService:
         await self._db.refresh(receipt, attribute_names=["flags"])
 
         owner = await self._get_receipt_owner(receipt.user_id)
-        relief_status = await self._build_relief_status_for_receipt(owner, receipt)
+        relief_status = await self._build_relief_status_for_receipt(
+            owner,
+            reviewer_session,
+            receipt,
+        )
         return self._to_detail(receipt, relief_status=relief_status)
 
     async def bulk_approve_org_pending(
         self,
         reviewer: User,
+        reviewer_session: UserInSession,
         *,
         tax_year: int | None = None,
     ) -> tuple[int, int]:
-        if reviewer.org_id is None or reviewer.role not in self.ORG_ADMIN_ROLES:
+        if reviewer_session.org_id is None or reviewer_session.role not in self.ORG_ADMIN_ROLES:
             raise AppError(
                 message="Akses ditolak. Hanya HR admin dibenarkan.",
                 code="FORBIDDEN",
@@ -619,7 +810,7 @@ class ReceiptService:
             )
 
         pending = await self._receipts.list_all_pending_for_org(
-            org_id=reviewer.org_id,
+            org_id=reviewer_session.org_id,
             tax_year=tax_year,
         )
 
@@ -630,6 +821,7 @@ class ReceiptService:
             try:
                 await self.review_receipt(
                     reviewer,
+                    reviewer_session,
                     receipt.id,
                     ReceiptReviewRequest(action="approve"),
                 )
@@ -642,9 +834,10 @@ class ReceiptService:
     async def get_receipt_file(
         self,
         user: User,
+        session: UserInSession,
         receipt_id: uuid.UUID,
     ) -> tuple[bytes, str, str | None]:
-        receipt = await self._get_owned_receipt(user.id, receipt_id)
+        receipt = await self._get_owned_receipt(user.id, self._active_org_id(session), receipt_id)
         storage = get_receipt_storage()
         content = storage.read_receipt_file(receipt.image_key)
         if content is None:
@@ -661,9 +854,10 @@ class ReceiptService:
     async def get_receipt_thumbnail(
         self,
         user: User,
+        session: UserInSession,
         receipt_id: uuid.UUID,
     ) -> tuple[bytes, str]:
-        receipt = await self._get_owned_receipt(user.id, receipt_id)
+        receipt = await self._get_owned_receipt(user.id, self._active_org_id(session), receipt_id)
         storage = get_receipt_storage()
         content = storage.read_thumbnail(receipt.image_key)
         if content is None:
@@ -677,9 +871,10 @@ class ReceiptService:
     async def get_receipt_download(
         self,
         user: User,
+        session: UserInSession,
         receipt_id: uuid.UUID,
     ) -> ReceiptDownloadData:
-        receipt = await self._get_owned_receipt(user.id, receipt_id)
+        receipt = await self._get_owned_receipt(user.id, self._active_org_id(session), receipt_id)
         storage = get_receipt_storage()
         if not storage.receipt_file_exists(receipt.image_key):
             raise AppError(
@@ -697,6 +892,7 @@ class ReceiptService:
     async def _get_owned_receipt(
         self,
         user_id: uuid.UUID,
+        org_id: uuid.UUID | None,
         receipt_id: uuid.UUID,
         *,
         include_flags: bool = False,
@@ -705,6 +901,7 @@ class ReceiptService:
         receipt = await self._receipts.get_by_id_for_user(
             receipt_id,
             user_id,
+            org_id=org_id,
             include_flags=include_flags,
             include_line_items=include_line_items,
         )
@@ -716,9 +913,36 @@ class ReceiptService:
             )
         return receipt
 
+    async def _enforce_org_monthly_upload_limit(self, user: User, session: UserInSession) -> None:
+        org_id = self._active_org_id(session)
+        if org_id is None:
+            return
+
+        policy = await OrgPolicyRepository(self._db).get_by_org_id(org_id)
+        if policy is None:
+            return
+
+        today = datetime.now(UTC).date()
+        month_start = today.replace(day=1)
+        count = await self._receipts.count_uploads_this_month(
+            user_id=user.id,
+            org_id=org_id,
+            month_start=month_start,
+            month_end=today,
+        )
+        if count >= policy.max_receipts_per_month:
+            raise AppError(
+                message=(
+                    f"Had muat naik bulanan ({policy.max_receipts_per_month} resit) "
+                    "telah dicapai."
+                ),
+                code="VALIDATION_ERROR",
+                status_code=422,
+            )
+
     async def _get_receipt_for_org_review(
         self,
-        reviewer: User,
+        reviewer: UserInSession,
         receipt_id: uuid.UUID,
     ) -> Receipt:
         if reviewer.org_id is None or reviewer.role not in self.ORG_ADMIN_ROLES:
@@ -757,6 +981,7 @@ class ReceiptService:
     async def _update_receipt_line_items(
         self,
         user: User,
+        session: UserInSession,
         receipt: Receipt,
         updates: list[ReceiptLineItemUpdate],
     ) -> ReceiptDetail:
@@ -806,15 +1031,15 @@ class ReceiptService:
                 new_by_category=new_by_category,
             )
         elif receipt.status in ("pending", "flagged"):
-            await self._apply_line_item_limit_flags(receipt, user)
+            await self._apply_line_item_limit_flags(receipt, user, session)
 
         await self._db.flush()
         await self._db.refresh(receipt, attribute_names=["flags", "line_items"])
 
-        relief_status = await self._build_relief_status_for_receipt(user, receipt)
+        relief_status = await self._build_relief_status_for_receipt(user, session, receipt)
         return self._to_detail(receipt, relief_status=relief_status)
 
-    async def _apply_line_item_limit_flags(self, receipt: Receipt, user: User) -> None:
+    async def _apply_line_item_limit_flags(self, receipt: Receipt, user: User, session: UserInSession) -> None:
         by_category = category_amounts_from_line_items(receipt.line_items)
         receipt.status = "pending"
 
@@ -824,6 +1049,8 @@ class ReceiptService:
                 tax_year=receipt.tax_year,
                 category=category,
                 new_claimed_amount=claimed,
+                context_type=self._context_type(session),
+                org_id=self._active_org_id(session),
                 exclude_receipt_id=receipt.id,
                 raise_on_exceed=False,
             )
@@ -839,6 +1066,7 @@ class ReceiptService:
                 break
 
     async def _apply_approved_claims(self, receipt: Receipt) -> None:
+        context_type = "corporate" if receipt.org_id is not None else "individual"
         if self._has_itemised_claim(receipt):
             by_category = category_amounts_from_line_items(receipt.line_items)
             for category, amount in by_category.items():
@@ -848,6 +1076,8 @@ class ReceiptService:
                     category=category,
                     amount_delta=amount,
                     count_delta=1,
+                    context_type=context_type,
+                    org_id=receipt.org_id,
                 )
             return
 
@@ -858,9 +1088,12 @@ class ReceiptService:
                 category=receipt.category,
                 amount_delta=receipt.claimed_amount,
                 count_delta=1,
+                context_type=context_type,
+                org_id=receipt.org_id,
             )
 
     async def _remove_approved_claims(self, receipt: Receipt) -> None:
+        context_type = "corporate" if receipt.org_id is not None else "individual"
         if self._has_itemised_claim(receipt):
             by_category = category_amounts_from_line_items(receipt.line_items)
             for category, amount in by_category.items():
@@ -870,6 +1103,8 @@ class ReceiptService:
                     category=category,
                     amount_delta=-amount,
                     count_delta=-1,
+                    context_type=context_type,
+                    org_id=receipt.org_id,
                 )
             return
 
@@ -880,6 +1115,8 @@ class ReceiptService:
                 category=receipt.category,
                 amount_delta=-receipt.claimed_amount,
                 count_delta=-1,
+                context_type=context_type,
+                org_id=receipt.org_id,
             )
 
     async def _sync_line_item_claim_delta(
@@ -907,6 +1144,8 @@ class ReceiptService:
                     category=category,
                     amount_delta=amount_delta,
                     count_delta=count_delta,
+                    context_type="corporate" if receipt.org_id is not None else "individual",
+                    org_id=receipt.org_id,
                 )
 
     @staticmethod
@@ -931,6 +1170,8 @@ class ReceiptService:
                 category=old_category,
                 amount_delta=-old_claimed,
                 count_delta=-1,
+                context_type="corporate" if receipt.org_id is not None else "individual",
+                org_id=receipt.org_id,
             )
 
         if receipt.category and receipt.claimed_amount:
@@ -940,18 +1181,29 @@ class ReceiptService:
                 category=receipt.category,
                 amount_delta=receipt.claimed_amount if category_changed else receipt.claimed_amount - old_claimed,
                 count_delta=1 if category_changed else 0,
+                context_type="corporate" if receipt.org_id is not None else "individual",
+                org_id=receipt.org_id,
             )
 
-    async def _build_relief_status_for_receipt(self, user: User, receipt: Receipt):
+    async def _build_relief_status_for_receipt(
+        self,
+        user: User,
+        session: UserInSession,
+        receipt: Receipt,
+    ):
         if not receipt.category or receipt.category in NON_CLAIMABLE_CATEGORIES:
             return None
 
         claimed = receipt.claimed_amount or Decimal("0")
+        context_type = "corporate" if receipt.org_id is not None else "individual"
+        active_org_id = receipt.org_id if context_type == "corporate" else None
         result = await self._limits.check_claim(
             user_id=user.id,
             tax_year=receipt.tax_year,
             category=receipt.category,
             new_claimed_amount=claimed,
+            context_type=context_type,
+            org_id=active_org_id,
             exclude_receipt_id=receipt.id if receipt.status in ("pending", "flagged") else None,
             raise_on_exceed=False,
         )
@@ -961,6 +1213,8 @@ class ReceiptService:
                 user_id=user.id,
                 tax_year=receipt.tax_year,
                 category=receipt.category,
+                context_type=context_type,
+                org_id=active_org_id,
             )
             relief_limit = result.relief_status.limit_amount
             remaining = max(Decimal("0"), relief_limit - approved_total)
@@ -971,7 +1225,7 @@ class ReceiptService:
             )
             if approved_total > relief_limit:
                 status = "full"
-            elif approved_total >= relief_limit * Decimal("0.90"):
+            elif approved_total >= relief_limit * Decimal("0.80"):
                 status = "warning"
             else:
                 status = "ok"
@@ -993,14 +1247,13 @@ class ReceiptService:
         receipt: Receipt,
         *,
         flag_type: str,
-        message: str,
+        message: str | None,
     ) -> None:
-        flag = ReceiptFlag(
-            receipt_id=receipt.id,
-            flag_type=flag_type,
-            message=message,
+        await self._receipts.create_flag(
+            receipt.id,
+            flag_type,
+            message,
         )
-        self._db.add(flag)
 
     def _parse_sort(self, sort: str) -> tuple[str, str]:
         if ":" in sort:

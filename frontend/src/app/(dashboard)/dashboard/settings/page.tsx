@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ForwardingEmailCard } from "@/components/settings/forwarding-email-card";
 import { NotificationPreferencesForm } from "@/components/settings/notification-preferences-form";
 import { SettingsProfileForm } from "@/components/settings/settings-profile-form";
 import { SessionsList } from "@/components/settings/sessions-list";
@@ -98,21 +99,7 @@ export default async function SettingsPage() {
       <div className="grid gap-6 xl:grid-cols-[1.3fr_1fr]">
         <div className="space-y-6">
           <SettingsProfileForm user={user} />
-          {user.forwarding_address ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>{t("settings", "forwardingTitle")}</CardTitle>
-                <CardDescription>
-                  {t("settings", "forwardingDescription")}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="rounded-md border bg-muted/40 px-3 py-2 font-mono text-sm">
-                  {user.forwarding_address}
-                </p>
-              </CardContent>
-            </Card>
-          ) : null}
+          <ForwardingEmailCard forwardingToken={user.user_id.slice(0, 8)} />
           <NotificationPreferencesForm preferences={preferences} />
         </div>
         <SessionsList sessions={sessions} />

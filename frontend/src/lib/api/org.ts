@@ -2,6 +2,7 @@ import "server-only";
 
 import { apiFetch, forwardSessionCookie } from "@/lib/api/client";
 import { requireSessionCookieHeader } from "@/lib/api/session";
+import { env } from "@/env";
 import type {
   InviteAcceptData,
   InviteCreateData,
@@ -207,3 +208,40 @@ export async function bulkImportEmployeesWithFastApi(payload: {
     },
   );
 }
+
+export async function exportPayrollCsvWithFastApi(
+  taxYear: number,
+  template: "generic" | "sql_payroll" | "kakitangan" = "generic",
+) {
+  const cookie = await requireSessionCookieHeader();
+  const params = new URLSearchParams({
+    tax_year: String(taxYear),
+    template,
+  });
+  const response = await fetch(
+    `${env.FASTAPI_URL}/api/v1/org/export/csv?${params.toString()}`,
+    {
+      headers: { Cookie: cookie },
+      cache: "no-store",
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to export payroll CSV.");
+  }
+
+  return response.blob();
+}
+
+export const registerOrg = registerOrgWithFastApi;
+export const getOrgDetails = fetchOrgMe;
+export const updateOrgPolicy = updateOrgPolicyWithFastApi;
+export const getEmployees = fetchOrgEmployees;
+export const bulkApprove = bulkApproveOrgPendingWithFastApi;
+export const reviewReceipt = reviewReceiptWithFastApi;
+export const getAnalytics = fetchOrgAnalytics;
+export const exportPayrollCsv = exportPayrollCsvWithFastApi;
+export const validateInvite = validateInviteWithFastApi;
+export const acceptInvite = acceptInviteWithFastApi;
+export const createHrInvite = inviteHrAdminWithFastApi;
+export const createEmployeeInvites = inviteEmployeesWithFastApi;

@@ -8,7 +8,7 @@ export const SYSTEM_CONFIG_KEYS = [
 ] as const;
 
 export const systemSettingsSchema = z.object({
-  auth_rate_limit_max: z.number().int().min(1).max(100),
+  auth_rate_limit_max: z.number().int().min(0).max(100),
   auth_rate_limit_window_seconds: z.number().int().min(60).max(86400),
   audit_retention_days: z.number().int().min(1).max(3650),
   receipt_retention_days: z.number().int().min(1).max(3650),

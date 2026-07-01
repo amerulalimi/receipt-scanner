@@ -48,3 +48,9 @@ export async function closeUploadSessionWithFastApi(token: string) {
     { method: "POST" },
   );
 }
+
+export const createQRSession = createUploadSessionWithFastApi;
+export const validateQRSession = validateUploadSessionWithFastApi;
+export const keepAliveQRSession = keepAliveUploadSessionWithFastApi;
+export const closeQRSession = closeUploadSessionWithFastApi;
+export const uploadViaQR = uploadViaSessionWithFastApi;

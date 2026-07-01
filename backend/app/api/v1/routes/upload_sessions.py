@@ -2,7 +2,11 @@ from fastapi import APIRouter, Body, Depends, File, Request, UploadFile, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+
 from app.core.deps import CurrentUserDep, SessionDataDep, get_db, get_redis_client
+from app.core.exceptions import AppError
+from app.core.rate_limiter import enforce_rate_limit, effective_rate_limit, user_rate_limiter
 from app.schemas.common import ApiResponse
 from app.schemas.upload_session import (
     UploadSessionCloseResponse,
@@ -15,6 +19,12 @@ from app.schemas.upload_session import (
 from app.services.upload_session import UploadSessionService
 
 router = APIRouter(prefix="/upload-sessions", tags=["upload-sessions"])
+
+_rate_limit_session_create = user_rate_limiter(
+    "upload-sessions:create",
+    effective_rate_limit(10),
+    3600,
+)
 
 
 def _upload_session_service(
@@ -34,6 +44,7 @@ async def create_upload_session(
     session_data: SessionDataDep,
     payload: UploadSessionCreateRequest = Body(default_factory=UploadSessionCreateRequest),
     service: UploadSessionService = Depends(_upload_session_service),
+    _rate_limit: None = Depends(_rate_limit_session_create),
 ) -> ApiResponse[UploadSessionCreateResponse]:
     data = await service.create_session(
         current_user,
@@ -65,9 +76,36 @@ async def upload_via_session(
     request: Request,
     file: UploadFile = File(...),
     service: UploadSessionService = Depends(_upload_session_service),
+    redis: Redis = Depends(get_redis_client),
 ) -> ApiResponse[UploadSessionUploadResponse]:
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > settings.max_upload_size_bytes:
+                raise AppError(
+                    message="Saiz fail melebihi had yang dibenarkan.",
+                    code="VALIDATION_ERROR",
+                    status_code=422,
+                )
+        except ValueError:
+            pass
+
+    await enforce_rate_limit(
+        redis,
+        key_prefix="upload-sessions:upload",
+        identifier=token,
+        max_requests=effective_rate_limit(60),
+        window_seconds=3600,
+    )
+
     user_agent = request.headers.get("User-Agent", "")
     content = await file.read()
+    if len(content) > settings.max_upload_size_bytes:
+        raise AppError(
+            message="Saiz fail melebihi 10MB.",
+            code="VALIDATION_ERROR",
+            status_code=422,
+        )
     data = await service.upload_receipt(
         token,
         filename=file.filename,

@@ -1,9 +1,31 @@
 # API Specification
 ## Resit.my — FastAPI Endpoint Reference
-**Version:** 1.0.0  
-**Base URL:** `https://api.resit.my/v1`  
+**Version:** 1.1.0  
+**Base URL:** `{host}/api/v1` (contoh produksi: `https://api.resit.my/api/v1`)  
 **Auth:** Stateful server-side session via `resit_sess` cookie  
-**Format:** JSON (application/json)
+**Format:** JSON (application/json)  
+**Last synced with codebase:** June 2026
+
+---
+
+## 0. Implementation Notes
+
+Perbezaan utama antara spesifikasi asal dan pelaksanaan semasa:
+
+| Item | Spesifikasi asal | Pelaksanaan semasa |
+|---|---|---|
+| Eksport ZIP individu | Job async + poll | `GET /claims/export-zip` — muat turun segera |
+| Kelulusan HR | `PATCH /org/receipts/{id}/review` | `POST /receipts/{id}/review` |
+| Senarai resit HR | `GET /org/receipts` | `GET /org/pending-receipts` |
+| Kelulusan pukal | `POST /org/receipts/bulk-review` | `POST /org/pending-receipts/bulk-approve` |
+| Eksport ZIP korporat | `POST /org/bulk-download` | **Belum dilaksanakan** |
+| Pengesahan domain | `POST /org/verify-domain` | **Belum dilaksanakan** |
+| Thumbnail / fail resit | Presigned URL dalam JSON | `GET /receipts/{id}/file` dan `/thumbnail` — proxy terus |
+| Muat naik dengan tahun | — | `tax_year` pada `POST /receipts/upload` dan sesi QR |
+
+Endpoint tambahan yang wujud dalam kod tetapi tiada dalam spesifikasi asal: lihat Bahagian 12–17.
+
+**Health check (tiada auth):** `GET /health` → `{ "data": { "status": "ok" }, "error": null }`
 
 ---
 
@@ -104,6 +126,40 @@ Authenticate and create server session.
 **Set-Cookie:** `resit_sess=<session_id>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=28800`
 
 **Rate limit:** 5 requests / 15 min / IP
+
+---
+
+### `POST /auth/refresh`
+Perbaharui TTL sesi aktif. Set semula cookie `resit_sess`.
+
+**Response `200`:**
+```json
+{ "success": true, "data": null, "message": null }
+```
+
+---
+
+### `PATCH /auth/me`
+Kemas kini profil pengguna (nama, tahun cukai, bracket cukai).
+
+**Request:**
+```json
+{
+  "full_name": "Ahmad Mukhriz",
+  "tax_year": 2025,
+  "tax_bracket": 15.0
+}
+```
+
+---
+
+### `POST /auth/resend-verification`
+Hantar semula e-mel pengesahan. Memerlukan sesi aktif.
+
+**Response `200`:**
+```json
+{ "success": true, "data": null, "message": "E-mel pengesahan telah dihantar semula" }
+```
 
 ---
 
@@ -413,6 +469,7 @@ Upload receipt from local storage (desktop).
 ```
 Content-Type: multipart/form-data
 files: [file1.jpg, file2.pdf]     // max 20 files, 10MB each
+tax_year: 2025                    // optional form field
 ```
 
 **Response `202`:** (processing async)
@@ -456,6 +513,7 @@ List user's receipts with filters.
         "category": "perubatan",
         "be_seksyen": "S.46(1)(b)",
         "status": "approved",
+        "scan_status": "success",
         "ai_confidence": 0.97,
         "file_type": "jpg",
         "thumbnail_url": "https://...",   // presigned, 15-min TTL
@@ -488,8 +546,21 @@ Get single receipt detail.
     "category": "perubatan",
     "be_seksyen": "S.46(1)(b)",
     "status": "approved",
+    "scan_status": "success",
     "ai_confidence": 0.97,
     "ai_nota": "Klinik persendirian, consultation + ubat",
+    "notes": "Nota peribadi pengguna",
+    "line_items": [
+      {
+        "id": "uuid",
+        "description": "Ubat",
+        "amount": 120.00,
+        "category": "perubatan",
+        "ai_claimable": true,
+        "included_in_claim": true,
+        "sort_order": 0
+      }
+    ],
     "ocr_confidence": 0.94,
     "image_url": "https://...",       // presigned, 15-min TTL
     "flags": [],
@@ -503,15 +574,70 @@ Get single receipt detail.
 ---
 
 ### `PATCH /receipts/{receipt_id}`
-Edit category or claimed amount (user correction).
+Edit category, claimed amount, notes, or line-item inclusion.
 
 **Request:**
 ```json
 {
   "category": "gaya_hidup",
-  "claimed_amount": 150.00
+  "claimed_amount": 150.00,
+  "notes": "Nota peribadi",
+  "line_items": [
+    { "id": "uuid", "included_in_claim": true, "category": "perubatan" }
+  ]
 }
 ```
+
+---
+
+### `POST /receipts`
+Create receipt record with pre-uploaded storage key (advanced / internal flow).
+
+---
+
+### `POST /receipts/manual`
+Manual entry — bypass OCR for illegible receipts.
+
+**Request:**
+```json
+{
+  "merchant_name": "Klinik Faiza",
+  "receipt_date": "2025-06-14",
+  "total_amount": 320.00,
+  "category": "perubatan",
+  "claimed_amount": 320.00,
+  "notes": "Resit kertas thermal pudar",
+  "tax_year": 2025
+}
+```
+
+---
+
+### `POST /receipts/{receipt_id}/reprocess`
+Re-queue receipt for AI classification (after admin fixes model config).
+
+---
+
+### `POST /receipts/{receipt_id}/review`
+Approve or reject receipt. **HR Admin + Superadmin.**
+
+**Request:**
+```json
+{
+  "action": "approve",
+  "comment": "Resit jelas, layak dituntut"
+}
+```
+
+---
+
+### `GET /receipts/{receipt_id}/file`
+Stream original receipt image/PDF (authenticated proxy).
+
+---
+
+### `GET /receipts/{receipt_id}/thumbnail`
+Stream receipt thumbnail image.
 
 ---
 
@@ -543,50 +669,37 @@ Get presigned download URL for original image.
 ---
 
 ### `POST /receipts/bulk-download`
-Generate ZIP for selected or filtered receipts.
-
-**Request:**
-```json
-{
-  "receipt_ids": ["uuid1", "uuid2"],    // specific IDs, OR use filters
-  "filters": {
-    "category": "perubatan",
-    "tax_year": 2025,
-    "status": "approved"
-  },
-  "include_summary_pdf": true
-}
-```
-
-**Response `202`:** (async job)
-```json
-{
-  "success": true,
-  "data": {
-    "job_id": "uuid",
-    "estimated_files": 8
-  }
-}
-```
+> **Belum dilaksanakan.** Guna `GET /claims/export-zip` untuk eksport ZIP individu segera.
 
 ---
 
-### `GET /receipts/download-job/{job_id}`
-Poll ZIP generation status.
+### `GET /claims/export-zip`
+Generate and download ZIP for user's receipts in a tax year. **Synchronous.**
 
-**Response `200`:**
-```json
-{
-  "success": true,
-  "data": {
-    "status": "ready",      // pending | processing | ready | failed
-    "download_url": "https://...",
-    "expires_in": 900,
-    "file_name": "ResitCukai_BE_2025_Ahmad.zip",
-    "file_size_bytes": 4823012
-  }
-}
-```
+**Query:** `?tax_year=2025`
+
+**Response `200`:** `application/zip` attachment
+
+---
+
+### `GET /claims/compare`
+Year-over-year claim comparison.
+
+**Query:** `?tax_year=2025` (tahun semasa; tahun sebelumnya auto)
+
+---
+
+### `GET /claims/ready-to-file`
+Borang BE filing guide — field mapping, checklist, jumlah tuntutan.
+
+**Query:** `?tax_year=2025`
+
+---
+
+### `GET /claims/completeness`
+Claim completeness score and milestone message (engagement).
+
+**Query:** `?tax_year=2025`
 
 ---
 
@@ -635,65 +748,66 @@ Get user's claim totals per category for a tax year.
 
 ## 7. HR Approval Endpoints
 
-### `GET /org/receipts`
-List all employee receipts. **HR Admin + Superadmin.**
+### `GET /org/pending-receipts`
+List pending employee receipts. **HR Admin + Superadmin.**
 
-**Query params:** `?status=pending&user_id=uuid&category=perubatan&page=1&limit=20`
+**Query params:** `?tax_year=2025&page=1&limit=20`
 
 ---
 
-### `PATCH /org/receipts/{receipt_id}/review`
-Approve or reject a receipt. **HR Admin + Superadmin.**
+### `POST /org/pending-receipts/bulk-approve`
+Approve all pending receipts in org (optionally filtered by tax year). **HR Admin + Superadmin.**
 
-**Request:**
-```json
-{
-  "action": "approved",         // "approved" | "rejected"
-  "comment": "Resit jelas, layak dituntut"
-}
-```
+**Query:** `?tax_year=2025`
 
 **Response `200`:**
 ```json
 {
   "success": true,
-  "data": {
-    "receipt_id": "uuid",
-    "status": "approved",
-    "reviewed_by": "uuid",
-    "reviewed_at": "2025-06-14T11:00:00Z"
-  }
+  "data": { "approved_count": 12, "skipped_count": 2 }
 }
 ```
 
 ---
 
-### `POST /org/receipts/bulk-review`
-Bulk approve or reject. **HR Admin + Superadmin.**
+### `GET /org/analytics`
+Org spend trends, top claimers, approval turnaround. **HR Admin + Superadmin.**
+
+**Query:** `?tax_year=2025`
+
+---
+
+### `GET /org/export/csv`
+Export approved claims as payroll CSV.
+
+**Query:** `?tax_year=2025&template=generic`
+
+**Response `200`:** `text/csv` attachment
+
+---
+
+### `POST /org/employees/bulk-import`
+Bulk import employees by email list (JSON body, not multipart CSV).
 
 **Request:**
 ```json
 {
-  "receipt_ids": ["uuid1", "uuid2", "uuid3"],
-  "action": "approved",
-  "comment": null
+  "employees": [
+    { "email": "siti@syarikat.com.my", "full_name": "Siti", "employee_code": "E001" }
+  ]
 }
 ```
 
 ---
 
-### `POST /org/bulk-download`
-Generate ZIP for one or all employees. **HR Admin + Superadmin.**
+### `DELETE /org/employees/{user_id}`
+Remove employee from organisation. **HR Admin + Superadmin.**
 
-**Request:**
-```json
-{
-  "user_ids": ["uuid1"],    // omit for all employees
-  "tax_year": 2025,
-  "status": "approved",
-  "include_summary_pdf": true
-}
-```
+---
+
+### Endpoints asal (rujukan — belum / berbeza)
+
+`GET /org/receipts`, `PATCH /org/receipts/{id}/review`, `POST /org/receipts/bulk-review`, `POST /org/bulk-download` — **tidak wujud**; guna endpoint di atas.
 
 ---
 
@@ -701,6 +815,11 @@ Generate ZIP for one or all employees. **HR Admin + Superadmin.**
 
 ### `POST /upload-sessions`
 Generate QR token for mobile camera handoff. **Authenticated desktop user.**
+
+**Request (optional body):**
+```json
+{ "tax_year": 2025 }
+```
 
 **Response `201`:**
 ```json
@@ -831,28 +950,133 @@ Real-time updates for desktop during QR session. **Authenticated.**
 
 ## 10. Config Endpoints (Superadmin)
 
-### `GET /config/relief-limits`
-Get all relief limits for a tax year.
+### `GET /config/relief-categories`
+Senarai kategori pelepasan aktif. **Semua pengguna authenticated.**
 
-**Query:** `?tax_year=2025`
+---
+
+### `GET /config/relief-limits`
+Get all relief limits (global, tanpa `tax_year`). **Superadmin.**
+
+---
+
+### `POST /config/relief-limits`
+Create new relief limit category. **Superadmin.**
 
 ---
 
 ### `PATCH /config/relief-limits/{category}`
-Update a relief limit. **Superadmin only.**
+Update a relief limit. **Superadmin.**
 
 **Request:**
 ```json
 {
-  "tax_year": 2025,
   "limit_amount": 9000.00,
-  "description_my": "Perubatan & Pergigian (dikemaskini)"
+  "description_my": "Perubatan & Pergigian (dikemaskini)",
+  "is_active": true,
+  "sort_order": 1
 }
 ```
 
 ---
 
-## 11. Rate Limits Summary
+### `DELETE /config/relief-limits/{category}`
+Deactivate relief limit. **Superadmin.**
+
+---
+
+### `GET /config/audit-logs`
+Senarai audit log (paginated). **Superadmin.**
+
+**Query:** `?action=receipt.approved&page=1&limit=50`
+
+---
+
+### `GET /config/system/overview`
+Ringkasan sistem (pengguna, resit, storan). **Superadmin.**
+
+---
+
+### `POST /config/system/purge-retention`
+Jalankan pembersihan data lepas tempoh retention. **Superadmin.**
+
+---
+
+### `GET /config/settings`
+Senarai tetapan sistem (bukan rahsia). **Superadmin.**
+
+### `PUT /config/settings/{key}` / `PATCH /config/settings`
+Urus tetapan seperti model AI, had muat naik, dll.
+
+---
+
+### `GET /config/secrets`
+Senarai rahsia (nilai dimask). **Superadmin.**
+
+### `PUT /config/secrets/{key}` / `PATCH /config/secrets`
+Urus rahsia terenkripsi (`openrouter_api_key`, dll).
+
+### `GET /config/secrets/openrouter/health`
+Uji sambungan OpenRouter + model vision aktif.
+
+---
+
+## 11. Household Endpoints (Spouse Linking)
+
+### `GET /household`
+Overview isi rumah — pasangan dipaut, ringkasan gabungan, permintaan menunggu.
+
+---
+
+### `POST /household/spouse-link`
+Minta pautan pasangan melalui e-mel.
+
+**Request:** `{ "partner_email": "pasangan@example.com" }`
+
+---
+
+### `POST /household/spouse-link/{link_id}/respond`
+Terima atau tolak permintaan. **Request:** `{ "action": "accept" | "reject" }`
+
+---
+
+### `DELETE /household/spouse-link/{link_id}`
+Putuskan pautan pasangan.
+
+---
+
+### `POST /household/receipts/{receipt_id}/reassign`
+Pindahkan resit kepada pasangan yang dipaut.
+
+**Request:** `{ "target_user_id": "uuid" }`
+
+---
+
+### `GET /household/receipts/{receipt_id}/claim-suggestion`
+Cadangan siapa patut menuntut resit (baki had + bracket cukai).
+
+---
+
+## 12. Notification Endpoints
+
+### `GET /notifications/preferences`
+### `PATCH /notifications/preferences`
+
+**Preference fields:** `email_enabled`, `in_app_enabled`, `digest_frequency` (`off` | `monthly`)
+
+---
+
+### `GET /notifications`
+Senarai notifikasi in-app (auto-sync peringatan tahun/bulan).
+
+---
+
+### `POST /notifications/{notification_id}/dismiss`
+Tutup notifikasi.
+
+---
+
+## 13. Rate Limits Summary
 
 | Endpoint | Limit |
 |---|---|

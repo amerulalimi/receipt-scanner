@@ -64,7 +64,11 @@ export async function ClaimCategoryCard({
               ? t("dashboard", "statusFull")
               : t("dashboard", "statusAlmostFull")}
           </span>
-        ) : null}
+        ) : (
+          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+            {t("dashboard", "statusOk")}
+          </span>
+        )}
       </div>
 
       <div className="mt-4 space-y-2">

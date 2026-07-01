@@ -83,6 +83,7 @@ class UserNotificationRepository:
             return existing
 
         notification = UserNotification(
+            id=uuid.uuid4(),
             user_id=user_id,
             reminder_key=reminder_key,
             type=type,
@@ -93,6 +94,7 @@ class UserNotificationRepository:
             message_en=message_en,
             action_href=action_href,
             expires_at=expires_at,
+            created_at=datetime.now(UTC),
         )
         self._db.add(notification)
         await self._db.flush()

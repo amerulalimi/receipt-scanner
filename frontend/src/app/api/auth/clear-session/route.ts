@@ -8,10 +8,6 @@ const ALLOWED_REDIRECTS = [
   "/dashboard/receipts",
   "/dashboard/org",
   "/dashboard/settings",
-  "/admin",
-  "/admin/secrets",
-  "/admin/ai",
-  "/admin/system",
 ] as const;
 
 function resolveRedirectPath(value: string | null): string {

@@ -1,11 +1,13 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import {
   startTransition,
   useActionState,
   useEffect,
+  useState,
 } from "react";
 import { Controller, useForm } from "react-hook-form";
 
@@ -27,6 +29,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   loginSchema,
   type LoginFormValues,
@@ -40,6 +43,7 @@ type LoginFormProps = {
 
 export function LoginForm({ redirectTo, registered }: LoginFormProps) {
   const t = useTranslations("auth");
+  const [showPassword, setShowPassword] = useState(false);
   const [state, submitAction, isPending] = useActionState(
     loginAction,
     initialAuthState,
@@ -50,6 +54,7 @@ export function LoginForm({ redirectTo, registered }: LoginFormProps) {
     defaultValues: {
       email: "",
       password: "",
+      login_context: "individual",
     },
   });
 
@@ -65,10 +70,14 @@ export function LoginForm({ redirectTo, registered }: LoginFormProps) {
     }
   }, [state.fieldErrors, form]);
 
+  const serverError =
+    state.errorCode === "INVALID_CREDENTIALS" ? t("login_error") : state.error;
+
   function onSubmit(values: LoginFormValues) {
     const formData = new FormData();
     formData.set("email", values.email);
     formData.set("password", values.password);
+    formData.set("login_context", values.login_context);
     if (redirectTo) {
       formData.set("redirect", redirectTo);
     }
@@ -90,21 +99,47 @@ export function LoginForm({ redirectTo, registered }: LoginFormProps) {
             role="status"
             className="mb-4 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-foreground"
           >
-            {t("loginSuccessRegistered")}
+            {t("register_success")}
           </p>
         ) : null}
 
-        {state.error ? (
+        {serverError ? (
           <p
             role="alert"
             className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
           >
-            {state.error}
+            {serverError}
           </p>
         ) : null}
 
         <form onSubmit={form.handleSubmit(onSubmit)}>
           <FieldGroup>
+            <Controller
+              name="login_context"
+              control={form.control}
+              render={({ field }) => (
+                <Field>
+                  <FieldLabel>Pilih jenis log masuk</FieldLabel>
+                  <Tabs
+                    value={field.value}
+                    onValueChange={(value) =>
+                      field.onChange(value as LoginFormValues["login_context"])
+                    }
+                    className="w-full"
+                  >
+                    <TabsList className="grid h-auto w-full grid-cols-2">
+                      <TabsTrigger value="individual" className="py-2">
+                        Individual
+                      </TabsTrigger>
+                      <TabsTrigger value="corporate" className="py-2">
+                        Corporate
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </Field>
+              )}
+            />
+
             <Controller
               name="email"
               control={form.control}
@@ -115,7 +150,7 @@ export function LoginForm({ redirectTo, registered }: LoginFormProps) {
                     id="login-email"
                     type="email"
                     autoComplete="email"
-                    placeholder="you@example.com"
+                    placeholder="anda@example.com"
                     aria-invalid={!!fieldState.error}
                     {...field}
                   />
@@ -130,13 +165,32 @@ export function LoginForm({ redirectTo, registered }: LoginFormProps) {
               render={({ field, fieldState }) => (
                 <Field data-invalid={!!fieldState.error}>
                   <FieldLabel htmlFor="login-password">{t("password")}</FieldLabel>
-                  <Input
-                    id="login-password"
-                    type="password"
-                    autoComplete="current-password"
-                    aria-invalid={!!fieldState.error}
-                    {...field}
-                  />
+                  <div className="relative">
+                    <Input
+                      id="login-password"
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="current-password"
+                      aria-invalid={!!fieldState.error}
+                      className="pr-10"
+                      {...field}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={
+                        showPassword ? t("hidePassword") : t("showPassword")
+                      }
+                    >
+                      {showPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </Button>
+                  </div>
                   <FieldError errors={[fieldState.error]} />
                 </Field>
               )}

@@ -1,4 +1,8 @@
-"""Promote a user to superadmin by email."""
+"""Promote a user to superadmin by email.
+
+Deprecated for platform admin access — use create_platform_admin instead.
+Org superadmin promotion via users table remains valid for corporate accounts.
+"""
 
 from __future__ import annotations
 

@@ -53,6 +53,12 @@ def email_matches_domain(email: str, domain: str) -> bool:
     return email.split("@")[-1].lower() == domain.lower()
 
 
+def as_utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 class OrgService:
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
@@ -102,16 +108,16 @@ class OrgService:
         if existing_ssm is not None:
             raise AppError(
                 message="Nombor SSM ini sudah didaftarkan.",
-                code="VALIDATION_ERROR",
-                status_code=422,
+                code="ORG_SSM_EXISTS",
+                status_code=400,
             )
 
         existing_domain = await self._orgs.get_by_email_domain(email_domain)
         if existing_domain is not None:
             raise AppError(
                 message="Domain e-mel ini sudah didaftarkan.",
-                code="VALIDATION_ERROR",
-                status_code=422,
+                code="ORG_DOMAIN_EXISTS",
+                status_code=400,
             )
 
         org = await self._orgs.create_with_policy(
@@ -142,21 +148,19 @@ class OrgService:
             domain_verified=org.domain_verified,
         )
 
-    async def get_my_org(self, user: User) -> OrgMeResponseData:
-        if user.account_type != "corporate":
-            raise AppError(
-                message="Akses organisasi hanya untuk akaun korporat.",
-                code="FORBIDDEN",
-                status_code=403,
-            )
-        if user.org_id is None:
+    async def get_my_org(
+        self,
+        user: User,
+        org_id: uuid.UUID | None = None,
+    ) -> OrgMeResponseData:
+        if org_id is None:
             raise AppError(
                 message="Anda bukan ahli organisasi.",
                 code="NOT_FOUND",
                 status_code=404,
             )
 
-        org = await self._orgs.get_by_id_with_policy(user.org_id)
+        org = await self._orgs.get_by_id_with_policy(org_id)
         if org is None or org.org_policy is None:
             raise AppError(
                 message="Organisasi tidak dijumpai.",
@@ -186,15 +190,18 @@ class OrgService:
         self,
         user: User,
         payload: OrgPolicyUpdateRequest,
+        *,
+        org_id: uuid.UUID | None = None,
     ) -> OrgPolicyData:
-        if user.org_id is None:
+        org_id = org_id or user.org_id
+        if org_id is None:
             raise AppError(
                 message="Organisasi tidak dijumpai.",
                 code="NOT_FOUND",
                 status_code=404,
             )
 
-        policy = await self._policies.get_by_org_id(user.org_id)
+        policy = await self._policies.get_by_org_id(org_id)
         if policy is None:
             raise AppError(
                 message="Dasar organisasi tidak dijumpai.",
@@ -236,12 +243,13 @@ class OrgService:
         self,
         user: User,
         *,
+        org_id: uuid.UUID | None = None,
         search: str | None,
         status: str | None,
         page: int,
         limit: int,
     ) -> OrgEmployeeListResponse:
-        if user.org_id is None:
+        if org_id is None:
             raise AppError(
                 message="Organisasi tidak dijumpai.",
                 code="NOT_FOUND",
@@ -249,7 +257,7 @@ class OrgService:
             )
 
         rows, total = await self._users.list_org_employees(
-            user.org_id,
+            org_id,
             search=search,
             status=status,
             page=page,
@@ -281,11 +289,12 @@ class OrgService:
         self,
         user: User,
         *,
+        org_id: uuid.UUID | None = None,
         tax_year: int | None,
         page: int,
         limit: int,
     ) -> OrgPendingReceiptListResponse:
-        if user.org_id is None:
+        if org_id is None:
             raise AppError(
                 message="Organisasi tidak dijumpai.",
                 code="NOT_FOUND",
@@ -293,7 +302,7 @@ class OrgService:
             )
 
         rows, total = await self._receipts.list_pending_for_org(
-            org_id=user.org_id,
+            org_id=org_id,
             tax_year=tax_year,
             page=page,
             limit=limit,
@@ -331,8 +340,10 @@ class OrgService:
         user: User,
         employee_id: uuid.UUID,
         payload: OrgEmployeeUpdateRequest,
+        *,
+        org_id: uuid.UUID | None = None,
     ) -> OrgEmployeeItem:
-        if user.org_id is None:
+        if org_id is None:
             raise AppError(
                 message="Organisasi tidak dijumpai.",
                 code="NOT_FOUND",
@@ -346,7 +357,7 @@ class OrgService:
                 status_code=422,
             )
 
-        employee = await self._users.get_org_member(user.org_id, employee_id)
+        employee = await self._users.get_org_member(org_id, employee_id)
         if employee is None:
             raise AppError(
                 message="Pekerja tidak dijumpai.",
@@ -373,7 +384,7 @@ class OrgService:
             )
 
         rows, _ = await self._users.list_org_employees(
-            user.org_id,
+            org_id,
             search=None,
             status=None,
             page=1,
@@ -381,7 +392,7 @@ class OrgService:
         )
         # Re-fetch stats for this employee only via list with search by email
         rows, _ = await self._users.list_org_employees(
-            user.org_id,
+            org_id,
             search=updated.email,
             status=None,
             page=1,
@@ -415,8 +426,10 @@ class OrgService:
         self,
         user: User,
         employee_id: uuid.UUID,
+        *,
+        org_id: uuid.UUID | None = None,
     ) -> None:
-        if user.org_id is None:
+        if org_id is None:
             raise AppError(
                 message="Organisasi tidak dijumpai.",
                 code="NOT_FOUND",
@@ -430,7 +443,7 @@ class OrgService:
                 status_code=422,
             )
 
-        employee = await self._users.get_org_member(user.org_id, employee_id)
+        employee = await self._users.get_org_member(org_id, employee_id)
         if employee is None:
             raise AppError(
                 message="Pekerja tidak dijumpai.",
@@ -456,14 +469,18 @@ class OrgService:
         await AuditService(self._db).log(
             action="org.employee_removed",
             user_id=user.id,
-            org_id=user.org_id,
+            org_id=org_id,
             resource="user",
             resource_id=employee_id,
             metadata={"email": removed.email},
         )
 
-    def _invite_expires_at(self) -> datetime:
-        return datetime.now(UTC) + timedelta(seconds=settings.invite_ttl_seconds)
+    def _invite_expires_at(self, role: str) -> datetime:
+        if role == "hr_admin":
+            ttl_seconds = 48 * 60 * 60
+        else:
+            ttl_seconds = 7 * 24 * 60 * 60
+        return datetime.now(UTC) + timedelta(seconds=ttl_seconds)
 
     def _build_invite_url(self, token: str) -> str:
         return f"{settings.frontend_url.rstrip('/')}/join/{token}"
@@ -476,16 +493,26 @@ class OrgService:
         role: str,
         invite_type: str,
         invited_email: str | None,
+        invited_full_name: str | None = None,
+        invited_employee_code: str | None = None,
     ) -> InviteToken:
         token = secrets.token_urlsafe(32)
+        now = datetime.now(UTC)
         invite = InviteToken(
+            id=uuid.uuid4(),
             token=token,
             org_id=org_id,
             invited_email=invited_email.lower() if invited_email else None,
+            invited_full_name=invited_full_name.strip() if invited_full_name else None,
+            invited_employee_code=(
+                invited_employee_code.strip() if invited_employee_code else None
+            ),
             invited_by=invited_by,
             role=role,
             invite_type=invite_type,
-            expires_at=self._invite_expires_at(),
+            used=False,
+            expires_at=self._invite_expires_at(role),
+            created_at=now,
         )
         return await self._invites.create(invite)
 
@@ -564,7 +591,7 @@ class OrgService:
                 status_code=404,
             )
 
-        expires_at = self._invite_expires_at()
+        expires_at = self._invite_expires_at("employee")
 
         if payload.type == "link":
             invite = await self._create_invite(
@@ -649,7 +676,7 @@ class OrgService:
         if invite is None or invite.used:
             return InviteValidateResponseData(valid=False)
 
-        if invite.expires_at < datetime.now(UTC):
+        if as_utc_datetime(invite.expires_at) < datetime.now(UTC):
             return InviteValidateResponseData(valid=False)
 
         org_name = invite.organisation.name if invite.organisation else None
@@ -658,6 +685,8 @@ class OrgService:
             org_name=org_name,
             role=invite.role,
             invited_email=invite.invited_email,
+            invited_full_name=invite.invited_full_name,
+            invited_employee_code=invite.invited_employee_code,
             expires_at=invite.expires_at,
         )
 
@@ -670,26 +699,32 @@ class OrgService:
         redis,
     ) -> tuple[InviteAcceptResponseData, str]:
         invite = await self._invites.get_by_token(payload.token)
-        if invite is None or invite.used:
+        if invite is None:
             raise AppError(
-                message="Jemputan tidak sah atau telah digunakan.",
-                code="VALIDATION_ERROR",
-                status_code=422,
+                message="Jemputan tidak dijumpai.",
+                code="INVITE_NOT_FOUND",
+                status_code=404,
+            )
+        if invite.used:
+            raise AppError(
+                message="Jemputan telah digunakan.",
+                code="INVITE_ALREADY_USED",
+                status_code=400,
             )
 
-        if invite.expires_at < datetime.now(UTC):
+        if as_utc_datetime(invite.expires_at) < datetime.now(UTC):
             raise AppError(
                 message="Jemputan telah tamat tempoh.",
-                code="VALIDATION_ERROR",
-                status_code=422,
+                code="INVITE_EXPIRED",
+                status_code=400,
             )
 
         email = payload.email.lower().strip()
         if invite.invited_email and invite.invited_email != email:
             raise AppError(
                 message="E-mel tidak sepadan dengan jemputan.",
-                code="VALIDATION_ERROR",
-                status_code=422,
+                code="EMAIL_MISMATCH",
+                status_code=400,
             )
 
         org = invite.organisation
@@ -703,8 +738,8 @@ class OrgService:
         if not email_matches_domain(email, org.email_domain):
             raise AppError(
                 message=f"E-mel mesti menggunakan domain @{org.email_domain}.",
-                code="VALIDATION_ERROR",
-                status_code=422,
+                code="DOMAIN_MISMATCH",
+                status_code=400,
             )
 
         existing = await self._users.get_by_email(email)
@@ -715,13 +750,18 @@ class OrgService:
                 status_code=422,
             )
 
+        full_name = payload.full_name.strip()
+        if not full_name and invite.invited_full_name:
+            full_name = invite.invited_full_name
+
         user = await self._users.create(
             email=email,
             password_hash=hash_password(payload.password),
-            full_name=payload.full_name.strip(),
+            full_name=full_name,
             role=invite.role,
             org_id=org.id,
             account_type="corporate",
+            org_employee_code=invite.invited_employee_code,
         )
         await self._invites.mark_used(invite, used_by=user.id)
 
@@ -749,13 +789,68 @@ class OrgService:
         self,
         user: User,
         payload: OrgEmployeeBulkImportRequest,
+        *,
+        org_id: uuid.UUID | None = None,
     ) -> OrgEmployeeBulkImportResponse:
-        emails = [row.email.lower().strip() for row in payload.employees if row.email.strip()]
-        invite_result = await self.invite_employees(
-            user,
-            InviteEmployeesRequest(type="email", emails=emails),
-        )
+        if org_id is None:
+            raise AppError(
+                message="Organisasi tidak dijumpai.",
+                code="NOT_FOUND",
+                status_code=404,
+            )
+
+        org = await self._orgs.get_by_id(org_id)
+        if org is None:
+            raise AppError(
+                message="Organisasi tidak dijumpai.",
+                code="NOT_FOUND",
+                status_code=404,
+            )
+
+        invited_count = 0
+        last_invite: InviteToken | None = None
+        for row in payload.employees:
+            email = row.email.lower().strip()
+            if not email:
+                continue
+            if not email_matches_domain(email, org.email_domain):
+                raise AppError(
+                    message=f"E-mel {email} mesti menggunakan domain @{org.email_domain}.",
+                    code="DOMAIN_MISMATCH",
+                    status_code=400,
+                )
+            existing = await self._users.get_by_email(email)
+            if existing is not None:
+                raise AppError(
+                    message=f"E-mel {email} sudah didaftarkan.",
+                    code="VALIDATION_ERROR",
+                    status_code=422,
+                )
+            last_invite = await self._create_invite(
+                org_id=org.id,
+                invited_by=user.id,
+                role="employee",
+                invite_type="csv",
+                invited_email=email,
+                invited_full_name=row.full_name,
+                invited_employee_code=row.employee_code,
+            )
+            invite_url = self._build_invite_url(last_invite.token)
+            await send_invite_email(
+                email=email,
+                invite_url=invite_url,
+                org_name=org.name,
+            )
+            invited_count += 1
+
+        if invited_count == 0 or last_invite is None:
+            raise AppError(
+                message="Tiada jemputan dihantar.",
+                code="VALIDATION_ERROR",
+                status_code=422,
+            )
+
         return OrgEmployeeBulkImportResponse(
-            invited_count=invite_result.invited_count,
-            invite_url=invite_result.invite_url,
+            invited_count=invited_count,
+            invite_url=self._build_invite_url(last_invite.token),
         )

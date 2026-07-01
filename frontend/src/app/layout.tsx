@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 
+import { ErrorBoundary } from "@/components/error-boundary";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { NuqsProvider } from "@/components/providers/nuqs-provider";
 import { Toaster } from "@/components/ui/sonner";
@@ -42,14 +43,16 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <I18nProvider locale={locale} dictionary={dictionary}>
-          <NuqsProvider>
-            <TooltipProvider>
-              {children}
-              <Toaster />
-            </TooltipProvider>
-          </NuqsProvider>
-        </I18nProvider>
+        <ErrorBoundary>
+          <I18nProvider locale={locale} dictionary={dictionary}>
+            <NuqsProvider>
+              <TooltipProvider>
+                {children}
+                <Toaster />
+              </TooltipProvider>
+            </NuqsProvider>
+          </I18nProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );

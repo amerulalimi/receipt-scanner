@@ -12,14 +12,14 @@ function SessionErrorView({ message }: { message: string }) {
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 px-4 py-8 text-center">
       <Clock className="size-12 text-muted-foreground" aria-hidden />
-      <h1 className="text-xl font-semibold">Session unavailable</h1>
+      <h1 className="text-xl font-semibold">Sesi tidak tersedia</h1>
       <p className="text-muted-foreground">{message}</p>
     </main>
   );
 }
 
 export const metadata = {
-  title: "Upload Receipt",
+  title: "Muat Naik Resit",
 };
 
 export default async function QrUploadSessionPage({
@@ -29,7 +29,7 @@ export default async function QrUploadSessionPage({
   const parsed = parseUploadSessionToken(token);
 
   if (!parsed.success) {
-    return <SessionErrorView message="Invalid upload link." />;
+    return <SessionErrorView message="Pautan muat naik tidak sah." />;
   }
 
   let result;
@@ -37,7 +37,7 @@ export default async function QrUploadSessionPage({
     result = await validateUploadSessionWithFastApi(parsed.data);
   } catch {
     return (
-      <SessionErrorView message="Unable to reach the server. Please try again." />
+      <SessionErrorView message="Tidak dapat menghubungi pelayan. Sila cuba lagi." />
     );
   }
 
@@ -49,7 +49,7 @@ export default async function QrUploadSessionPage({
         message={
           body.success === false
             ? body.message
-            : "Session expired. Please scan a new QR code."
+            : "Sesi tamat. Sila imbas QR baru."
         }
       />
     );
@@ -57,7 +57,7 @@ export default async function QrUploadSessionPage({
 
   if (response.status >= 400) {
     return (
-      <SessionErrorView message="Upload session not found or has expired." />
+      <SessionErrorView message="Sesi muat naik tidak dijumpai atau telah tamat." />
     );
   }
 

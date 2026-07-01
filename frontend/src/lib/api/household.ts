@@ -6,10 +6,20 @@ import type {
   ClaimSuggestionData,
   HouseholdOverviewData,
 } from "@/lib/api/types";
+import type { SpouseLink } from "@/lib/types/household";
 
-export async function fetchHouseholdOverview() {
+export async function fetchHouseholdOverview(taxYear?: number) {
   const cookie = await requireSessionCookieHeader();
-  return apiFetch<HouseholdOverviewData>("/api/v1/household", { cookie });
+  const query = taxYear ? `?tax_year=${taxYear}` : "";
+  return apiFetch<HouseholdOverviewData>(`/api/v1/household${query}`, { cookie });
+}
+
+export async function getHouseholdOverview(taxYear: number) {
+  const { body } = await fetchHouseholdOverview(taxYear);
+  if (!body.success) {
+    throw new Error(body.message);
+  }
+  return body.data;
 }
 
 export async function requestSpouseLinkWithFastApi(payload: {
@@ -71,3 +81,55 @@ export async function fetchClaimSuggestion(receiptId: string) {
     { cookie },
   );
 }
+
+export async function getClaimSuggestion(receiptId: string) {
+  const { body } = await fetchClaimSuggestion(receiptId);
+  if (!body.success) {
+    throw new Error(body.message);
+  }
+  return body.data;
+}
+
+export async function requestSpouseLink(partnerEmail: string): Promise<SpouseLink> {
+  const { body } = await requestSpouseLinkWithFastApi({ partner_email: partnerEmail });
+  if (!body.success) {
+    throw new Error(body.message);
+  }
+  return {
+    id: body.data.link_id,
+    requester_id: "",
+    partner_id: null,
+    partner_email: partnerEmail,
+    status: body.data.status as SpouseLink["status"],
+    created_at: new Date().toISOString(),
+    responded_at: null,
+  };
+}
+
+export async function respondToLink(
+  linkId: string,
+  action: "accept" | "reject",
+): Promise<SpouseLink> {
+  const { body } = await respondSpouseLinkWithFastApi(linkId, { action });
+  if (!body.success) {
+    throw new Error(body.message);
+  }
+  return {
+    id: body.data.link_id,
+    requester_id: "",
+    partner_id: null,
+    partner_email: "",
+    status: body.data.status as SpouseLink["status"],
+    created_at: new Date().toISOString(),
+    responded_at: new Date().toISOString(),
+  };
+}
+
+export async function dissolveLink(linkId: string): Promise<void> {
+  const { body } = await dissolveSpouseLinkWithFastApi(linkId);
+  if (!body.success) {
+    throw new Error(body.message);
+  }
+}
+
+export const getHouseholdOverviewFromApi = getHouseholdOverview;

@@ -1,15 +1,19 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { DashboardWsEvent } from "@/lib/api/types";
+import type { DashboardWsEvent, WSEvent } from "@/lib/api/types";
 import { getDashboardWebSocketUrl } from "@/lib/upload-session-utils";
 
+const MAX_RECONNECT_ATTEMPTS = 3;
+const RECONNECT_DELAY_MS = 2000;
+
 type UseUploadSessionWebSocketOptions = {
-  token: string | null;
-  enabled: boolean;
+  token?: string | null;
+  enabled?: boolean;
   onSubscribed?: () => void;
   onReceiptAdded?: () => void;
+  onReceiptScanUpdated?: (receiptId: string, scanStatus: string) => void;
   onReceiptFailed?: (jobId: string, reason: string) => void;
   onSessionWarned?: (secondsRemaining: number) => void;
   onSessionExpired?: (reason: string) => void;
@@ -17,20 +21,32 @@ type UseUploadSessionWebSocketOptions = {
   onError?: (message: string) => void;
 };
 
+function toWSEvent(message: DashboardWsEvent): WSEvent | null {
+  if (message.type === "subscribed" || message.type === "error") {
+    return null;
+  }
+  return message;
+}
+
 export function useUploadSessionWebSocket({
-  token,
-  enabled,
+  token = null,
+  enabled = true,
   onSubscribed,
   onReceiptAdded,
+  onReceiptScanUpdated,
   onReceiptFailed,
   onSessionWarned,
   onSessionExpired,
   onSessionClosed,
   onError,
-}: UseUploadSessionWebSocketOptions) {
+}: UseUploadSessionWebSocketOptions = {}) {
+  const [isConnected, setIsConnected] = useState(false);
+  const [lastEvent, setLastEvent] = useState<WSEvent | null>(null);
+  const [activeToken, setActiveToken] = useState<string | null>(token);
   const callbacksRef = useRef({
     onSubscribed,
     onReceiptAdded,
+    onReceiptScanUpdated,
     onReceiptFailed,
     onSessionWarned,
     onSessionExpired,
@@ -41,6 +57,7 @@ export function useUploadSessionWebSocket({
   callbacksRef.current = {
     onSubscribed,
     onReceiptAdded,
+    onReceiptScanUpdated,
     onReceiptFailed,
     onSessionWarned,
     onSessionExpired,
@@ -48,39 +65,47 @@ export function useUploadSessionWebSocket({
     onError,
   };
 
+  const subscribe = useCallback((nextToken: string) => {
+    setActiveToken(nextToken);
+  }, []);
+
   useEffect(() => {
-    if (!enabled || !token) {
+    if (token !== null && token !== undefined) {
+      setActiveToken(token);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (!enabled || !activeToken) {
+      setIsConnected(false);
       return;
     }
 
-    const ws = new WebSocket(getDashboardWebSocketUrl());
-    let subscribed = false;
+    let ws: WebSocket | null = null;
+    let reconnectAttempts = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
 
-    ws.onopen = () => {
-      ws.send(
-        JSON.stringify({
-          type: "subscribe",
-          upload_session_token: token,
-        }),
-      );
-    };
-
-    ws.onmessage = (event) => {
-      let message: DashboardWsEvent;
-      try {
-        message = JSON.parse(event.data) as DashboardWsEvent;
-      } catch {
-        callbacksRef.current.onError?.("Invalid WebSocket message.");
-        return;
+    const handleMessage = (message: DashboardWsEvent) => {
+      const event = toWSEvent(message);
+      if (event) {
+        setLastEvent(event);
       }
 
       switch (message.type) {
         case "subscribed":
-          subscribed = true;
+          reconnectAttempts = 0;
+          setIsConnected(true);
           callbacksRef.current.onSubscribed?.();
           break;
         case "receipt_added":
           callbacksRef.current.onReceiptAdded?.();
+          break;
+        case "receipt_scan_updated":
+          callbacksRef.current.onReceiptScanUpdated?.(
+            message.data.receipt_id,
+            message.data.scan_status,
+          );
           break;
         case "receipt_failed":
           callbacksRef.current.onReceiptFailed?.(
@@ -108,14 +133,55 @@ export function useUploadSessionWebSocket({
       }
     };
 
-    ws.onerror = () => {
-      if (!subscribed) {
-        callbacksRef.current.onError?.("Real-time connection failed.");
+    const connect = () => {
+      if (disposed) {
+        return;
       }
+
+      ws = new WebSocket(getDashboardWebSocketUrl());
+
+      ws.onopen = () => {
+        ws?.send(
+          JSON.stringify({
+            type: "subscribe",
+            upload_session_token: activeToken,
+          }),
+        );
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          handleMessage(JSON.parse(event.data) as DashboardWsEvent);
+        } catch {
+          callbacksRef.current.onError?.("Mesej WebSocket tidak sah.");
+        }
+      };
+
+      ws.onerror = () => {
+        callbacksRef.current.onError?.("Sambungan masa nyata gagal.");
+      };
+
+      ws.onclose = () => {
+        setIsConnected(false);
+        if (disposed || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+          return;
+        }
+        reconnectAttempts += 1;
+        reconnectTimer = setTimeout(connect, RECONNECT_DELAY_MS);
+      };
     };
 
+    connect();
+
     return () => {
-      ws.close();
+      disposed = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      ws?.close();
+      setIsConnected(false);
     };
-  }, [enabled, token]);
+  }, [activeToken, enabled]);
+
+  return { isConnected, lastEvent, subscribe };
 }

@@ -48,7 +48,7 @@ export async function updateSettingsProfileAction(
     return { error: "Please log in again." };
   }
 
-  const { body } = await updateMeWithFastApi(cookie, parsed.data);
+  const body = await updateMeWithFastApi(cookie, parsed.data);
   if (!body.success) {
     return { error: body.message };
   }

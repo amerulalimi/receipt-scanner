@@ -1,18 +1,18 @@
 import "server-only";
 
-import { apiFetch, forwardSessionCookie } from "./client";
+import { apiFetch, forwardSessionCookie, get, patch, post } from "./client";
 import type {
   LoginData,
   MeData,
   RegisterData,
   SessionInfo,
-  VerifyEmailData,
 } from "./types";
 import { getSessionCookieHeader } from "./session";
 
 export async function loginWithFastApi(credentials: {
   email: string;
   password: string;
+  login_context: "individual" | "corporate";
 }) {
   const { response, body } = await apiFetch<LoginData>("/api/v1/auth/login", {
     method: "POST",
@@ -40,6 +40,10 @@ export async function registerWithFastApi(payload: {
     },
   );
 
+  if (body.success) {
+    await forwardSessionCookie(response);
+  }
+
   return { response, body };
 }
 
@@ -64,38 +68,30 @@ export async function refreshSessionWithFastApi(cookie: string) {
 }
 
 export async function verifyEmailWithFastApi(token: string) {
-  return apiFetch<VerifyEmailData>("/api/v1/auth/verify-email", {
-    method: "POST",
-    body: { token },
-  });
+  return post<null>("/api/v1/auth/verify-email", { token });
 }
 
 export async function resendVerificationWithFastApi(cookie: string) {
-  return apiFetch<null>("/api/v1/auth/resend-verification", {
-    method: "POST",
-    cookie,
-  });
+  return post<null>("/api/v1/auth/resend-verification", undefined, cookie);
+}
+
+export async function fetchMeWithFastApi(cookie: string) {
+  return get<MeData>("/api/v1/auth/me", cookie);
 }
 
 export async function updateMeWithFastApi(
   cookie: string,
   payload: {
-    full_name: string;
-    tax_year: number;
-    tax_bracket: number | null;
+    full_name?: string;
+    tax_year?: number;
+    tax_bracket?: number | null;
   },
 ) {
-  return apiFetch<MeData>("/api/v1/auth/me", {
-    method: "PATCH",
-    cookie,
-    body: payload,
-  });
+  return patch<MeData>("/api/v1/auth/me", payload, cookie);
 }
 
 export async function fetchSessionsWithFastApi(cookie: string) {
-  return apiFetch<SessionInfo[]>("/api/v1/auth/sessions", {
-    cookie,
-  });
+  return apiFetch<SessionInfo[]>("/api/v1/auth/sessions", { cookie });
 }
 
 export async function revokeSessionWithFastApi(

@@ -31,7 +31,7 @@ class AuditLogRepository:
             metadata_=metadata,
             ip_address=ip_address,
         )
-        self._db.add(entry)
+        self._db.sync_session.add(entry)
         await self._db.flush()
         await self._db.refresh(entry)
         return entry
@@ -68,6 +68,6 @@ class AuditLogRepository:
         )
         entries = list(result.scalars().all())
         for entry in entries:
-            await self._db.delete(entry)
+            self._db.sync_session.delete(entry)
         await self._db.flush()
         return len(entries)

@@ -1,7 +1,8 @@
 # Architecture Document
 ## Resit.my — System Architecture
-**Version:** 1.0.0  
-**Stack:** Next.js · FastAPI · PostgreSQL · Shadcn/UI
+**Version:** 1.1.0  
+**Stack:** Next.js 15 · React 19 · FastAPI · PostgreSQL · Redis · Shadcn/UI  
+**Last synced with codebase:** June 2026
 
 ---
 
@@ -53,8 +54,9 @@
 │  └──────────────┘  └──────────┘  └──────────┘  └────────┘   │
 │                                                             │
 │  ┌──────────────────────────┐  ┌──────────────────────────┐  │
-│  │   Google Vision API      │  │   Claude API (Haiku)     │  │
-│  │   (OCR)                  │  │   (Classification)       │  │
+│  │   OpenRouter Vision API  │  │   (via openrouter.ai)    │  │
+│  │   OCR + Classification   │  │   Model: gemini-2.5-flash│  │
+│  │   (single multimodal LLM)│  │   (configurable in admin)│  │
 │  └──────────────────────────┘  └──────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -147,70 +149,80 @@ Inactivity reset: every successful upload → `last_upload_at = now()` → Redis
 
 ## 3. Tech Stack Detail
 
-### Frontend — Next.js 14 (App Router)
+### Frontend — Next.js 15 (App Router)
 
 ```
-src/
+frontend/src/
 ├── app/
-│   ├── (auth)/
-│   │   ├── login/page.tsx
-│   │   └── register/page.tsx
+│   ├── (auth)/login, register/
 │   ├── (dashboard)/
-│   │   ├── layout.tsx          # role-based sidebar
-│   │   ├── dashboard/page.tsx  # personal
-│   │   ├── receipts/page.tsx
-│   │   ├── org/page.tsx        # hr_admin + superadmin
-│   │   └── settings/page.tsx
-│   └── upload/
-│       └── session/[token]/page.tsx  # mobile QR page
-├── components/
-│   ├── ui/                     # shadcn components
-│   ├── receipt/
-│   ├── dashboard/
-│   └── org/
+│   │   ├── dashboard/          # ringkasan + penapis tahun
+│   │   ├── receipts/           # senarai + muat naik
+│   │   ├── ready-to-file/      # panduan Borang BE
+│   │   ├── household/          # pautan pasangan (individu)
+│   │   ├── org/                # HR admin
+│   │   └── settings/           # profil, notifikasi, forwarding
+│   ├── (admin)/admin/          # superadmin: ai, secrets, system
+│   ├── upload/session/[token]/ # halaman kamera QR (mobile)
+│   ├── join/[token]/           # penerimaan jemputan
+│   └── verify-email/
+├── components/                   # shadcn + domain components
+├── actions/                    # Server Actions (mutasi data)
 ├── lib/
-│   ├── api.ts                  # axios instance
-│   ├── session.ts              # client session utils
-│   └── websocket.ts            # WS client
-└── middleware.ts                # route protection
+│   ├── api/                    # klien fetch server-side ke FastAPI
+│   ├── i18n/                   # BM / EN dictionaries
+│   └── validations/            # skema Zod dikongsi
+└── middleware.ts                 # perlindungan laluan + cookie sesi
 ```
 
-**Key libraries:**
-- `shadcn/ui` — component library
-- `react-query` (TanStack Query) — server state management
-- `zustand` — client UI state
-- `socket.io-client` — WebSocket for live sync
-- `react-dropzone` — file upload UX
-- `qrcode.react` — QR code generation
-- `jszip` — client-side ZIP preview (optional)
-- `axios` — HTTP client with cookie support (`withCredentials: true`)
+**Key libraries (pelaksanaan semasa):**
+- `shadcn/ui` + Radix — komponen UI
+- `react-hook-form` + `zod` — borang & validasi
+- `nuqs` — penapis URL (tahun cukai, kategori, status)
+- `qrcode.react` — penjanaan QR
+- Server Actions + `fetch` — **tiada** axios / TanStack Query / socket.io-client
+- WebSocket native (`/ws/dashboard`) untuk sinkron QR
+
+**Corak data:**
+- Data awal halaman: Server Components → `lib/api/*`
+- Mutasi: Server Actions → FastAPI `/api/v1/*`
+- Cookie `resit_sess` diurus oleh FastAPI; Next.js middleware semak kehadiran cookie
 
 ### Backend — FastAPI
 
 ```
-app/
-├── main.py
-├── core/
-│   ├── config.py
-│   ├── session.py          # Redis session middleware
-│   ├── security.py         # password hash, token gen
-│   └── dependencies.py     # get_current_user, require_role
-├── routers/
-│   ├── auth.py
-│   ├── receipts.py
-│   ├── org.py
-│   ├── upload_session.py   # QR token endpoints
-│   └── ws.py               # WebSocket manager
+backend/app/
+├── main.py                     # lifespan, CORS, /health, /ws/dashboard
+├── api/v1/
+│   ├── router.py
+│   └── routes/
+│       ├── auth.py
+│       ├── claims.py           # summary, compare, ready-to-file, export-zip
+│       ├── household.py        # spouse links
+│       ├── notifications.py
+│       ├── receipts.py
+│       ├── org.py              # employees, analytics, CSV export
+│       ├── invites.py
+│       ├── upload_sessions.py
+│       ├── config_admin.py     # relief limits, audit, retention
+│       ├── config_settings.py
+│       └── config_secrets.py   # OpenRouter key (encrypted)
+├── core/                       # config, session, security, redis, storage
+├── repositories/               # akses DB
 ├── services/
-│   ├── ocr_service.py      # Google Vision API
-│   ├── classify_service.py # Claude Haiku integration
-│   ├── rule_engine.py      # LHDN limits validation
-│   ├── zip_service.py      # ZIP generation
-│   └── email_service.py    # Invite emails
+│   ├── vision_llm.py           # OpenRouter multimodal classify
+│   ├── receipt_processor.py    # pipeline pemprosesan resit
+│   ├── rule_engine.py
+│   ├── borang_be.py            # ready-to-file mapping
+│   ├── household.py
+│   ├── org_analytics.py
+│   ├── engagement.py           # completeness score
+│   ├── export.py               # ZIP + CSV
+│   ├── notifications.py
+│   ├── job_queue.py            # Redis queue + WS pub/sub
+│   └── storage/                # local (dev) | s3/r2 (prod)
 ├── models/
-│   └── (SQLAlchemy ORM models)
 └── schemas/
-    └── (Pydantic request/response schemas)
 ```
 
 ### Database — PostgreSQL 15
@@ -226,38 +238,22 @@ app/
 - Background job queue (receipt processing)
 - Rate limiting counters
 
-### File Storage — Cloudflare R2 (recommended over S3)
+### File Storage — Local (dev) or S3/R2 (production)
 
-- No egress fees (important for receipt image downloads)
-- S3-compatible API — easy swap if needed
-- Presigned URLs for secure direct download (15-minute expiry)
-- Private bucket — no public access
+- `STORAGE_BACKEND=local` — fail disimpan di `./storage/receipts` (pembangunan)
+- `STORAGE_BACKEND=s3` — S3-compatible (Cloudflare R2 disyorkan untuk produksi)
+- Akses fail: proxy melalui `GET /receipts/{id}/file` dan `/thumbnail` (bukan presigned URL dalam senarai)
+- `GET /receipts/{id}/download` masih menyediakan URL muat turun jika diperlukan
 
 ---
 
 ## 4. WebSocket Architecture (QR Sync)
 
+Pemproses resit menerbitkan acara ke saluran Redis (`ws_events_channel`). Proses FastAPI melanggan dan menghantar ke desktop melalui `WS /ws/dashboard`.
+
 ```
-Desktop Browser              FastAPI WS               Mobile Browser
-      │                          │                          │
-      │── WS connect ───────────►│                          │
-      │   /ws/session/{sess_id}  │                          │
-      │                          │                          │
-      │                          │◄── POST /upload ─────────│
-      │                          │    (qr_token + image)    │
-      │                          │                          │
-      │                          │── process receipt ───────┤
-      │                          │   (OCR + classify)       │
-      │                          │                          │
-      │◄── WS event ─────────────│                          │
-      │    {type: "receipt_added"│                          │
-      │     receipt: {...}}      │                          │
-      │                          │── WS event ─────────────►│
-      │                          │   {type: "upload_done"   │
-      │                          │    receipt_id: "..."}    │
-      │                          │                          │
-      │── dashboard updates ─────┤                          │
-      │   (no page reload)       │                          │
+Receipt worker ──publish──► Redis pub/sub ──subscribe──► FastAPI WS ──► Desktop
+Mobile upload ──► FastAPI ──► Redis queue ──► receipt_processor ──► DB + WS event
 ```
 
 **WebSocket events:**
@@ -265,12 +261,13 @@ Desktop Browser              FastAPI WS               Mobile Browser
 | Event | Direction | Payload |
 |---|---|---|
 | `receipt_added` | Server → Desktop | receipt object |
-| `upload_done` | Server → Mobile | `{receipt_id, kategori, jumlah}` |
-| `session_warned` | Server → Mobile | `{seconds_remaining: 120}` |
+| `receipt_scan_updated` | Server → Desktop | `{receipt_id, scan_status}` |
+| `session_warned` | Server → Both | `{seconds_remaining: 120}` |
 | `session_expired` | Server → Both | `{reason: "inactivity"}` |
-| `keep_alive` | Mobile → Server | `{}` (resets timer) |
-| `session_closed` | Mobile → Server | `{}` (user tapped Done) |
-| `desktop_resumed` | Server → Desktop | `{uploads_count, total_amount}` |
+| `session_closed` | Server → Desktop | `{uploads_count, total_amount}` |
+| `receipt_failed` | Server → Desktop | `{job_id, reason}` |
+
+Mobile menggunakan REST (`keep-alive`, `close`) — bukan WS client events.
 
 ---
 
@@ -289,42 +286,40 @@ Receipt Image
                │ unique
                ▼
 ┌─────────────────────────────────────┐
-│  2. OCR — Google Vision API         │
-│     Extract: merchant, amount,      │
-│     date, line items                │
-│     confidence_score returned       │
+│  2. Vision LLM — OpenRouter         │
+│     Model: openrouter_vision_model  │
+│     (default: google/gemini-2.5-    │
+│      flash) — multimodal            │
+│     Extract + classify in one call  │
+│     PDF → skip, flag manual review  │
 └──────────────┬──────────────────────┘
                │
        ┌───────▼────────┐
        │ confidence < 70%│
-       │    ?            │
+       │ or mixed items  │
        └───┬─────────┬───┘
           Yes        No
            │         │
            ▼         ▼
     Flag: manual  ┌─────────────────────────────────────┐
-    review        │  3. LLM — Claude Haiku               │
-                  │     System: BE relief classifier     │
-                  │     Input: OCR text                  │
-                  │     Output: JSON {kategori, seksyen, │
-                  │     jumlah_claim, confidence, nota}  │
+    review        │  3. Line Items (if mixed receipt)    │
+                  │     receipt_line_items rows          │
+                  │     ai_claimable + included_in_claim │
                   └──────────────┬──────────────────────┘
                                  │
                                  ▼
                   ┌─────────────────────────────────────┐
                   │  4. Rule Engine                     │
-                  │     Load limits from DB config      │
-                  │     Check: current_claimed + amount │
-                  │     vs category_limit               │
-                  │     If exceed: flag, cap, or reject │
+                  │     Load limits from relief_limits  │
+                  │     Check category caps             │
                   └──────────────┬──────────────────────┘
                                  │
                                  ▼
                   ┌─────────────────────────────────────┐
                   │  5. Store to DB                     │
-                  │     receipt record + image_hash     │
-                  │     image → R2 bucket               │
-                  │     Emit WebSocket event            │
+                  │     scan_status: success|failed     │
+                  │     image → local or S3/R2          │
+                  │     Publish WS event via Redis      │
                   └─────────────────────────────────────┘
 ```
 
@@ -396,3 +391,31 @@ origins = [
 ```
 
 **Recommended hosting for MVP:** Railway.app or Render.com — simpler ops, auto SSL, easy PostgreSQL + Redis provisioning.
+
+---
+
+## 8. Admin & Configuration (Superadmin)
+
+Panel `/admin` dalam Next.js (superadmin sahaja):
+
+| Halaman | Fungsi |
+|---|---|
+| `/admin/ai` | Model vision OpenRouter, tetapan klasifikasi |
+| `/admin/secrets` | API keys terenkripsi (`system_settings` + Fernet) |
+| `/admin/system` | Ringkasan sistem, purge retention, audit |
+
+Rahsia API disimpan dalam jadual `system_settings` (nilai `encrypted_value`). Tetapan bukan-rahsia dalam `system_config`.
+
+Skrip operasi (`backend/scripts/`):
+- `send_notification_digests.py` — e-mel digest bulanan
+- `send_monthly_org_exports.py` — eksport CSV gaji berjadual
+- `requeue_receipts.py` — semula proses resit gagal
+- `check_openrouter_health.py` — ujian sambungan AI
+
+---
+
+## 9. Internationalization (i18n)
+
+- Bahasa: **Bahasa Malaysia** (lalai) dan **English**
+- Kamus: `frontend/src/lib/i18n/dictionaries/{ms,en}.json`
+- Notifikasi dwibahasa: `title_my` / `title_en`, `message_my` / `message_en` dalam `user_notifications`

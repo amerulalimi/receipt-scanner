@@ -19,6 +19,17 @@ export const env = createEnv({
       .positive()
       .default(28800)
       .describe("Session cookie max-age in seconds (match backend)"),
+    ADMIN_SESSION_COOKIE_NAME: z
+      .string()
+      .min(1)
+      .default("admin_resit_sess")
+      .describe("HttpOnly admin session cookie name forwarded to FastAPI"),
+    ADMIN_SESSION_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(28800)
+      .describe("Admin session cookie max-age in seconds (match backend)"),
   },
   client: {
     NEXT_PUBLIC_APP_URL: z
@@ -31,6 +42,8 @@ export const env = createEnv({
     FASTAPI_URL: process.env.FASTAPI_URL,
     SESSION_COOKIE_NAME: process.env.SESSION_COOKIE_NAME,
     SESSION_TTL_SECONDS: process.env.SESSION_TTL_SECONDS,
+    ADMIN_SESSION_COOKIE_NAME: process.env.ADMIN_SESSION_COOKIE_NAME,
+    ADMIN_SESSION_TTL_SECONDS: process.env.ADMIN_SESSION_TTL_SECONDS,
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
   },
   emptyStringAsUndefined: true,

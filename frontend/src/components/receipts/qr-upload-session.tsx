@@ -1,9 +1,9 @@
 "use client";
 
-import { QRCodeSVG } from "qrcode.react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { Camera, Link2, RefreshCw } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 
 import {
   createUploadSessionAction,
@@ -17,7 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { useUploadSessionWebSocket } from "@/hooks/use-upload-session-ws";
+import { useReceiptSync } from "@/hooks/use-receipt-sync";
 import type { UploadSessionCreateData } from "@/lib/api/types";
 import { formatCountdown } from "@/lib/upload-session-utils";
 import { useTranslations } from "@/lib/i18n/use-translations";
@@ -38,16 +38,33 @@ export function QrUploadSession({
   const [session, setSession] = useState<UploadSessionCreateData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [wsConnected, setWsConnected] = useState(false);
-  const [warnSeconds, setWarnSeconds] = useState<number | null>(null);
   const [isCreating, startCreateTransition] = useTransition();
   const [autoStarted, setAutoStarted] = useState(false);
+
+  const handleReceiptAdded = useCallback(() => {
+    setStatusMessage(t("qrReceiptAdded"));
+    void revalidateDashboardAction();
+    router.refresh();
+  }, [router, t]);
+
+  const handleSessionClosed = useCallback(
+    (uploadsCount: number, totalAmount: number) => {
+      setStatusMessage(
+        t("qrSessionComplete", {
+          count: uploadsCount,
+          amount: totalAmount.toFixed(2),
+        }),
+      );
+      setSession(null);
+      void revalidateDashboardAction();
+      router.refresh();
+    },
+    [router, t],
+  );
 
   const startSession = useCallback(() => {
     setError(null);
     setStatusMessage(null);
-    setWarnSeconds(null);
-    setWsConnected(false);
 
     startCreateTransition(async () => {
       const result = await createUploadSessionAction(selectedTaxYear);
@@ -60,6 +77,11 @@ export function QrUploadSession({
     });
   }, [selectedTaxYear, t]);
 
+  const handleSessionExpired = useCallback(() => {
+    setStatusMessage(t("qrSessionExpired"));
+    startSession();
+  }, [startSession, t]);
+
   useEffect(() => {
     if (autoStart && !autoStarted && !session && !isCreating) {
       setAutoStarted(true);
@@ -67,39 +89,12 @@ export function QrUploadSession({
     }
   }, [autoStart, autoStarted, session, isCreating, startSession]);
 
-  const handleSessionClosed = useCallback(
-    (uploadsCount: number, totalAmount: number) => {
-      setStatusMessage(
-        `Session complete — ${uploadsCount} receipt(s) (RM ${totalAmount.toFixed(2)}).`,
-      );
-      setSession(null);
-      setWsConnected(false);
-      void revalidateDashboardAction();
-      router.refresh();
-    },
-    [router],
-  );
-
-  const handleSessionExpired = useCallback(() => {
-    setStatusMessage("Session expired. Generating new QR code...");
-    startSession();
-  }, [startSession]);
-
-  useUploadSessionWebSocket({
-    token: session?.token ?? null,
+  const { isConnected, receivedCount, sessionWarning } = useReceiptSync({
+    uploadSessionToken: session?.token ?? null,
     enabled: !!session,
-    onSubscribed: () => setWsConnected(true),
-    onReceiptAdded: () => {
-      setStatusMessage("Receipt processed successfully.");
-      void revalidateDashboardAction();
-      router.refresh();
-    },
-    onReceiptFailed: (_jobId, reason) => {
-      setError(reason);
-    },
-    onSessionWarned: (secondsRemaining) => setWarnSeconds(secondsRemaining),
-    onSessionExpired: handleSessionExpired,
+    onReceiptAdded: handleReceiptAdded,
     onSessionClosed: handleSessionClosed,
+    onSessionExpired: handleSessionExpired,
     onError: (message) => setError(message),
   });
 
@@ -125,7 +120,7 @@ export function QrUploadSession({
 
       {!session ? (
         <Button type="button" onClick={startSession} disabled={isCreating}>
-          {isCreating ? "Generating QR…" : "Use phone camera"}
+          {isCreating ? t("qrGenerating") : t("qrGenerate")}
         </Button>
       ) : (
         <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
@@ -140,9 +135,13 @@ export function QrUploadSession({
           </div>
 
           <div className="space-y-3 text-sm">
-            <p className="text-muted-foreground">
-              Scan this QR code with your phone, or share the link below.
-            </p>
+            <p className="text-muted-foreground">{t("qrDescription")}</p>
+
+            {receivedCount > 0 ? (
+              <p className="font-medium text-foreground">
+                {t("qrReceivedCount", { count: receivedCount })}
+              </p>
+            ) : null}
 
             <div className="flex items-start gap-2 rounded-lg border bg-muted/40 p-3">
               <Link2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
@@ -158,20 +157,22 @@ export function QrUploadSession({
 
             <ul className="space-y-1 text-muted-foreground">
               <li>
-                Inactivity timeout:{" "}
+                {t("qrExpiresInLabel")}:{" "}
                 <span className="font-medium text-foreground">
                   {formatCountdown(session.inactivity_timeout)}
                 </span>
               </li>
               <li>
-                Connection status:{" "}
+                {t("qrConnectionStatus")}:{" "}
                 <span className="font-medium text-foreground">
-                  {wsConnected ? "Connected" : "Connecting…"}
+                  {isConnected ? t("qrConnected") : t("qrWaiting")}
                 </span>
               </li>
-              {warnSeconds !== null ? (
+              {sessionWarning ? (
                 <li className="text-amber-600 dark:text-amber-400">
-                  Warning: session expires in {formatCountdown(warnSeconds)}
+                  {t("qrExpiresIn", {
+                    time: formatCountdown(sessionWarning.secondsRemaining),
+                  })}
                 </li>
               ) : null}
             </ul>
@@ -184,7 +185,7 @@ export function QrUploadSession({
               disabled={isCreating}
             >
               <RefreshCw className="size-4" aria-hidden />
-              Generate new QR code
+              {t("qrRegenerate")}
             </Button>
           </div>
         </div>
@@ -201,11 +202,9 @@ export function QrUploadSession({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Camera className="size-5" aria-hidden />
-          Upload from Phone
+          {t("qrTitle")}
         </CardTitle>
-        <CardDescription>
-          Scan the QR code with your phone to capture receipts directly from the camera.
-        </CardDescription>
+        <CardDescription>{t("qrDescription")}</CardDescription>
       </CardHeader>
       <CardContent>{sessionContent}</CardContent>
     </Card>

@@ -1,13 +1,16 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import {
   startTransition,
   useActionState,
   useEffect,
+  useState,
 } from "react";
 import { Controller, useForm } from "react-hook-form";
+import { toast } from "sonner";
 
 import { registerAction } from "@/actions/auth";
 import { initialAuthState } from "@/actions/auth.types";
@@ -28,14 +31,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   registerSchema,
   type RegisterFormValues,
@@ -44,6 +40,7 @@ import { useTranslations } from "@/lib/i18n/use-translations";
 
 export function RegisterForm() {
   const t = useTranslations("auth");
+  const [showPassword, setShowPassword] = useState(false);
   const [state, submitAction, isPending] = useActionState(
     registerAction,
     initialAuthState,
@@ -73,6 +70,12 @@ export function RegisterForm() {
     }
   }, [state.fieldErrors, form]);
 
+  useEffect(() => {
+    if (state.errorCode === "EMAIL_EXISTS") {
+      toast.error(state.error);
+    }
+  }, [state.error, state.errorCode]);
+
   function onSubmit(values: RegisterFormValues) {
     const formData = new FormData();
     formData.set("email", values.email);
@@ -92,7 +95,7 @@ export function RegisterForm() {
         <CardDescription>{t("registerSubtitle")}</CardDescription>
       </CardHeader>
       <CardContent>
-        {state.error ? (
+        {state.error && state.errorCode !== "EMAIL_EXISTS" ? (
           <p
             role="alert"
             className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -109,13 +112,13 @@ export function RegisterForm() {
               render={({ field, fieldState }) => (
                 <Field data-invalid={!!fieldState.error}>
                   <FieldLabel htmlFor="register-full-name">
-                    {t("fullName")}
+                    {t("full_name")}
                   </FieldLabel>
                   <Input
                     id="register-full-name"
                     type="text"
                     autoComplete="name"
-                    placeholder="Jane Doe"
+                    placeholder="Ahmad bin Ali"
                     aria-invalid={!!fieldState.error}
                     {...field}
                   />
@@ -134,7 +137,7 @@ export function RegisterForm() {
                     id="register-email"
                     type="email"
                     autoComplete="email"
-                    placeholder="you@example.com"
+                    placeholder="anda@example.com"
                     aria-invalid={!!fieldState.error}
                     {...field}
                   />
@@ -151,16 +154,33 @@ export function RegisterForm() {
                   <FieldLabel htmlFor="register-password">
                     {t("password")}
                   </FieldLabel>
-                  <Input
-                    id="register-password"
-                    type="password"
-                    autoComplete="new-password"
-                    aria-invalid={!!fieldState.error}
-                    {...field}
-                  />
-                  <FieldDescription>
-                    Minimum 8 characters.
-                  </FieldDescription>
+                  <div className="relative">
+                    <Input
+                      id="register-password"
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="new-password"
+                      aria-invalid={!!fieldState.error}
+                      className="pr-10"
+                      {...field}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={
+                        showPassword ? t("hidePassword") : t("showPassword")
+                      }
+                    >
+                      {showPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </Button>
+                  </div>
+                  <FieldDescription>{t("password_min")}</FieldDescription>
                   <FieldError errors={[fieldState.error]} />
                 </Field>
               )}
@@ -171,29 +191,23 @@ export function RegisterForm() {
               control={form.control}
               render={({ field, fieldState }) => (
                 <Field data-invalid={!!fieldState.error}>
-                  <FieldLabel htmlFor="register-account-type">
-                    {t("accountType")}
-                  </FieldLabel>
-                  <Select
-                    name={field.name}
+                  <FieldLabel>{t("account_type")}</FieldLabel>
+                  <Tabs
                     value={field.value}
-                    onValueChange={field.onChange}
+                    onValueChange={(value) =>
+                      field.onChange(value as RegisterFormValues["account_type"])
+                    }
+                    className="w-full"
                   >
-                    <SelectTrigger
-                      id="register-account-type"
-                      className={cn(
-                        "w-full",
-                        fieldState.error && "border-destructive",
-                      )}
-                      aria-invalid={!!fieldState.error}
-                    >
-                      <SelectValue placeholder="Select account type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="individual">{t("accountIndividual")}</SelectItem>
-                      <SelectItem value="corporate">{t("accountOrganization")}</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    <TabsList className="grid h-auto w-full grid-cols-2">
+                      <TabsTrigger value="individual" className="py-2">
+                        {t("individual")}
+                      </TabsTrigger>
+                      <TabsTrigger value="corporate" className="py-2">
+                        {t("corporate")}
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
                   <FieldError errors={[fieldState.error]} />
                 </Field>
               )}

@@ -22,7 +22,12 @@
     "settings": "Settings",
     "logout": "Log out",
     "navigation": "Navigation",
-    "account": "Account"
+    "account": "Account",
+    "orgEmployees": "Employees",
+    "orgPending": "HR approvals",
+    "orgAnalytics": "Analytics",
+    "orgSettings": "Org settings",
+    "orgHrSection": "HR management"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -65,6 +70,18 @@
     "claimsNotFound": "Claims summary endpoint not found. Please restart the FastAPI server.",
     "statusFull": "Full",
     "statusAlmostFull": "Almost full",
+    "statusOk": "OK",
+    "receiptsProcessed": "Receipts processed",
+    "receiptsProcessedHint": "Approved receipts across all categories",
+    "completenessScore": "Completeness score",
+    "completenessScoreHint": "Based on 5 tracking criteria (max 100)",
+    "qrGenerating": "Generating QR…",
+    "qrReceiptAdded": "Receipt processed successfully.",
+    "qrSessionComplete": "Session complete — {count} receipt(s) (RM {amount}).",
+    "qrSessionExpired": "Session expired. Generating new QR code…",
+    "qrReceivedCount": "{count} receipt(s) received",
+    "qrExpiresInLabel": "Inactivity timeout",
+    "qrConnectionStatus": "Connection status",
     "claimed": "Claimed",
     "remaining": "Remaining {amount}",
     "receiptCount": "{count} receipts",
@@ -184,6 +201,7 @@
     "fullName": "Full name",
     "taxYear": "Default tax year",
     "taxBracket": "Estimated tax bracket (%)",
+    "taxBracketPlaceholder": "Select bracket",
     "saveProfile": "Save profile",
     "profileSaved": "Profile updated successfully.",
     "sessionsTitle": "Active sessions",
@@ -209,12 +227,16 @@
     "saveNotifications": "Save preferences",
     "savingNotifications": "Saving…",
     "forwardingTitle": "Receipt forwarding email",
-    "forwardingDescription": "Forward e-receipt PDFs or images to this address for automatic processing."
+    "forwardingDescription": "Forward e-receipt PDFs or images to this address for automatic processing.",
+    "forwardingCopy": "Copy",
+    "forwardingCopied": "Copied",
+    "forwardingComingSoon": "This feature is coming in a future update."
   },
   "notifications": {
     "panelTitle": "Smart reminders",
     "dismiss": "Dismiss",
-    "viewAction": "View action →"
+    "viewAction": "View action →",
+    "emptyState": "No new notifications"
   },
   "org": {
     "title": "Organization",
@@ -231,7 +253,38 @@
     "reject": "Reject",
     "bulkApprove": "Approve all",
     "bulkApproving": "Approving…",
-    "unnamedReceipt": "Unnamed receipt"
+    "unnamedReceipt": "Unnamed receipt",
+    "rejectDialogTitle": "Reject receipt",
+    "rejectDialogDescription": "Add a comment explaining why this receipt was rejected.",
+    "rejectCommentPlaceholder": "Reason for rejection (optional)",
+    "rejectCancel": "Cancel",
+    "rejectConfirm": "Reject receipt",
+    "bulkConfirmTitle": "Approve all pending?",
+    "bulkConfirmDescription": "This will approve {total} pending receipts for the selected tax year.",
+    "searchEmployees": "Search employees",
+    "searchEmployeesPlaceholder": "Name or email",
+    "statusFilter": "Status",
+    "statusAll": "All",
+    "statusActive": "Active",
+    "statusInactive": "Inactive",
+    "inviteTabEmail": "Email",
+    "inviteTabLink": "Link",
+    "inviteTabCsv": "CSV",
+    "inviteCsvPlaceholder": "Bulk CSV import is available in the employee list below (Phase 6 preview).",
+    "employeesEmpty": "No employees found. Invite new employees using the invitation form.",
+    "employeesCount": "{total} employees in the organization."
+  },
+  "orgNav": {
+    "overview": "Overview",
+    "employees": "Employees",
+    "pending": "HR approvals",
+    "analytics": "Analytics",
+    "settings": "Settings"
+  },
+  "join": {
+    "invalidTitle": "Invalid invitation",
+    "invalidDescription": "This invitation link is invalid, has already been used, or has expired.",
+    "invalidDescriptionBm": "Jemputan tidak sah atau telah tamat tempoh."
   },
   "readyToFile": {
     "title": "Ready to File — Borang BE",
@@ -249,7 +302,21 @@
     "printChecklist": "Print checklist",
     "pendingNotice": "{count} receipts still pending approval — totals below may change.",
     "disclaimer": "Resit.my does not submit forms to LHDN. Use as a reference guide only during e-Filing.",
-    "loadError": "Failed to load Borang BE guide."
+    "loadError": "Failed to load Borang BE guide.",
+    "totalRelief": "Total relief",
+    "filingTableTitle": "Borang BE filing checklist",
+    "filingTableHint": "Enter these amounts in MyTax when e-Filing.",
+    "colSection": "Section",
+    "colDescription": "Description",
+    "colAmount": "Amount",
+    "colReceipts": "Receipts",
+    "colStatus": "Status",
+    "statusReady": "Ready",
+    "statusPartial": "Partial",
+    "statusEmpty": "Empty",
+    "downloadZip": "Download receipt ZIP",
+    "exportingZip": "Preparing ZIP…",
+    "exportFailed": "Failed to download ZIP."
   },
   "errors": {
     "sessionExpired": "Session expired or server unavailable. Please log in again.",
@@ -264,7 +331,11 @@
     "subtitle": "How thoroughly you're tracking relief for {year}.",
     "categoriesTracked": "{tracked} of {total} categories with claims",
     "totalClaimed": "Total claimed",
-    "estimatedSavings": "Est. savings"
+    "estimatedSavings": "Est. savings",
+    "nextAction": "Next step",
+    "breakdownTitle": "Score breakdown",
+    "criterionAchieved": "+{points} pts",
+    "criterionPending": "Pending"
   },
   "household": {
     "title": "Household",

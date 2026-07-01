@@ -1,41 +1,33 @@
 import { z } from "zod";
 
 export const loginSchema = z.object({
-  email: z
-    .string()
-    .min(1, "Email is required")
-    .email("Invalid email format"),
-  password: z
-    .string()
-    .min(1, "Password is required")
-    .max(128, "Password is too long"),
+  email: z.string().email("E-mel tidak sah"),
+  password: z.string().min(1, "Kata laluan diperlukan"),
+  login_context: z.enum(["individual", "corporate"]),
 });
 
 export const registerSchema = z.object({
-  email: z
-    .string()
-    .min(1, "Email is required")
-    .email("Invalid email format"),
-  password: z
-    .string()
-    .min(8, "Password must be at least 8 characters")
-    .max(128, "Password is too long"),
-  full_name: z
-    .string()
-    .min(1, "Full name is required")
-    .max(255, "Name is too long"),
-  account_type: z.enum(["individual", "corporate"], {
-    message: "Account type is required",
-  }),
+  email: z.string().email("E-mel tidak sah"),
+  password: z.string().min(8, "Minimum 8 aksara"),
+  full_name: z.string().min(1, "Nama diperlukan"),
+  account_type: z.enum(["individual", "corporate"]),
+});
+
+export const updateProfileSchema = z.object({
+  full_name: z.string().min(1).optional(),
+  tax_year: z.number().int().optional(),
+  tax_bracket: z.number().min(0).max(100).optional(),
 });
 
 export type LoginFormValues = z.infer<typeof loginSchema>;
 export type RegisterFormValues = z.infer<typeof registerSchema>;
+export type UpdateProfileFormValues = z.infer<typeof updateProfileSchema>;
 
 export function parseLoginFormData(formData: FormData) {
   return loginSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),
+    login_context: formData.get("login_context"),
   });
 }
 

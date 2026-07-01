@@ -1,5 +1,5 @@
 import { AdminShell } from "@/components/admin/admin-shell";
-import { requireSuperadmin } from "@/lib/auth/require-superadmin";
+import { requireAdmin } from "@/lib/auth/require-admin";
 
 export const metadata = {
   title: "Admin",
@@ -10,10 +10,10 @@ export default async function AdminLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const user = await requireSuperadmin();
+  const admin = await requireAdmin();
 
   return (
-    <AdminShell userName={user.full_name ?? user.email} userEmail={user.email}>
+    <AdminShell userName={admin.full_name ?? admin.email} userEmail={admin.email}>
       {children}
     </AdminShell>
   );

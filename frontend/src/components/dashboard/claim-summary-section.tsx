@@ -5,7 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { ClaimSummaryData } from "@/lib/api/types";
+import type { ClaimSummaryData, CompletenessScoreData } from "@/lib/api/types";
 import { getCurrencyFormatter, getDictionary } from "@/lib/i18n/get-dictionary";
 import { createServerTranslator } from "@/lib/i18n/translate";
 import type { Locale } from "@/lib/i18n/locales";
@@ -14,12 +14,14 @@ import { ClaimCategoryCard } from "./claim-category-card";
 
 type ClaimSummarySectionProps = {
   summary: ClaimSummaryData;
+  completeness?: CompletenessScoreData | null;
   categoryLabels: Record<string, string>;
   locale: Locale;
 };
 
 export async function ClaimSummarySection({
   summary,
+  completeness,
   categoryLabels,
   locale,
 }: ClaimSummarySectionProps) {
@@ -31,19 +33,14 @@ export async function ClaimSummarySection({
     (total, category) => total + category.claimed,
     0,
   );
+  const totalReceipts = summary.categories.reduce(
+    (total, category) => total + category.receipt_count,
+    0,
+  );
 
   return (
     <section className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>{t("dashboard", "taxYear")}</CardDescription>
-            <CardTitle className="text-2xl tabular-nums">
-              {summary.tax_year}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>{t("dashboard", "totalClaimed")}</CardDescription>
@@ -69,6 +66,30 @@ export async function ClaimSummarySection({
             {t("dashboard", "estimatedSavingsHint", {
               bracket: summary.tax_bracket.toFixed(0),
             })}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>{t("dashboard", "receiptsProcessed")}</CardDescription>
+            <CardTitle className="text-2xl tabular-nums">
+              {totalReceipts}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 text-xs text-muted-foreground">
+            {t("dashboard", "receiptsProcessedHint")}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>{t("dashboard", "completenessScore")}</CardDescription>
+            <CardTitle className="text-2xl tabular-nums">
+              {completeness ? `${completeness.score}/100` : "—"}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 text-xs text-muted-foreground">
+            {t("dashboard", "completenessScoreHint")}
           </CardContent>
         </Card>
       </div>

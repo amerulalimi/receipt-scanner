@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -20,8 +21,10 @@ from app.schemas.upload_session import (
     UploadSessionUploadResponse,
     UploadSessionValidateResponse,
 )
+from app.services.job_queue import publish_ws_event
 from app.services.receipt import ReceiptService
-from app.services.ws_manager import ws_manager
+
+QR_PREFIX = "qr:"
 
 
 class UploadSessionService:
@@ -33,6 +36,10 @@ class UploadSessionService:
         self._sessions = UploadSessionRepository(db)
         self._users = UserRepository(db)
         self._receipts = ReceiptService(db)
+
+    @staticmethod
+    def _qr_key(token: str) -> str:
+        return f"{QR_PREFIX}{token}"
 
     async def create_session(
         self,
@@ -49,6 +56,7 @@ class UploadSessionService:
         expires_at = now + timedelta(hours=settings.upload_session_max_hours)
 
         session = UploadSession(
+            id=uuid.uuid4(),
             token=token,
             user_id=user.id,
             desktop_session=desktop_session_id,
@@ -56,9 +64,11 @@ class UploadSessionService:
             tax_year=tax_year or user.tax_year,
             inactivity_secs=inactivity_secs,
             expires_at=expires_at,
+            created_at=now,
         )
         session = await self._sessions.create(session)
         await self._db.commit()
+        await self._cache_session(session)
 
         upload_url = f"{settings.frontend_url}/upload/session/{token}"
         return UploadSessionCreateResponse(
@@ -72,7 +82,7 @@ class UploadSessionService:
     async def validate_token(self, token: str) -> UploadSessionValidateResponse:
         session = await self._require_valid_session(token)
         user = await self._require_user(session.user_id)
-        remaining = self._inactivity_remaining(session)
+        remaining = await self._inactivity_remaining(session)
 
         return UploadSessionValidateResponse(
             valid=True,
@@ -111,9 +121,10 @@ class UploadSessionService:
             session.status = "active"
         await self._sessions.update(session)
         await self._db.commit()
+        await self._refresh_qr_cache(session)
 
         job_id = str(upload_result.job_ids[0])
-        remaining = self._inactivity_remaining(session)
+        remaining = await self._inactivity_remaining(session)
 
         return UploadSessionUploadResponse(
             job_id=job_id,
@@ -130,9 +141,10 @@ class UploadSessionService:
             session.status = "active"
         await self._sessions.update(session)
         await self._db.commit()
+        await self._refresh_qr_cache(session)
 
         return UploadSessionKeepAliveResponse(
-            inactivity_remaining=self._inactivity_remaining(session),
+            inactivity_remaining=await self._inactivity_remaining(session),
         )
 
     async def close_session(self, token: str) -> UploadSessionCloseResponse:
@@ -143,15 +155,17 @@ class UploadSessionService:
         session.closed_at = now
         await self._sessions.update(session)
         await self._db.commit()
+        await self._delete_qr_cache(token)
 
         total_amount = await self._sessions.sum_receipts_since(
             session.user_id,
             session.created_at,
         )
 
-        await ws_manager.emit(
-            token,
-            {
+        await publish_ws_event(
+            self._redis,
+            upload_session_token=token,
+            event={
                 "type": "session_closed",
                 "data": {
                     "uploads_count": session.uploads_count,
@@ -164,6 +178,22 @@ class UploadSessionService:
             uploads_count=session.uploads_count,
             message="Sesi selesai. Sambung di desktop anda.",
         )
+
+    async def check_inactivity_warning(self, token: str) -> int | None:
+        ttl = await self._redis.ttl(self._qr_key(token))
+        if ttl < 0:
+            return None
+        if ttl <= settings.upload_session_warn_seconds:
+            await publish_ws_event(
+                self._redis,
+                upload_session_token=token,
+                event={
+                    "type": "session_warned",
+                    "data": {"seconds_remaining": int(ttl)},
+                },
+            )
+            return int(ttl)
+        return None
 
     async def assert_user_owns_session(self, user: User, token: str) -> UploadSession:
         session = await self._sessions.get_by_token(token)
@@ -180,6 +210,11 @@ class UploadSessionService:
                 status_code=403,
             )
         return session
+
+    def _ensure_utc(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value
 
     async def _require_valid_session(self, token: str) -> UploadSession:
         session = await self._sessions.get_by_token(token)
@@ -198,13 +233,15 @@ class UploadSessionService:
                 status_code=401,
             )
 
-        if now >= session.expires_at:
+        if now >= self._ensure_utc(session.expires_at):
             session.status = "expired"
             await self._sessions.update(session)
             await self._db.commit()
-            await ws_manager.emit(
-                token,
-                {"type": "session_expired", "data": {"reason": "max_lifetime"}},
+            await self._delete_qr_cache(token)
+            await publish_ws_event(
+                self._redis,
+                upload_session_token=token,
+                event={"type": "session_expired", "data": {"reason": "max_lifetime"}},
             )
             raise AppError(
                 message="Sesi telah tamat. Sila imbas QR baru.",
@@ -212,13 +249,16 @@ class UploadSessionService:
                 status_code=401,
             )
 
-        if self._inactivity_remaining(session) <= 0:
+        remaining = await self._inactivity_remaining(session)
+        if remaining <= 0:
             session.status = "expired"
             await self._sessions.update(session)
             await self._db.commit()
-            await ws_manager.emit(
-                token,
-                {"type": "session_expired", "data": {"reason": "inactivity"}},
+            await self._delete_qr_cache(token)
+            await publish_ws_event(
+                self._redis,
+                upload_session_token=token,
+                event={"type": "session_expired", "data": {"reason": "inactivity"}},
             )
             raise AppError(
                 message="Sesi telah tamat. Sila imbas QR baru.",
@@ -226,15 +266,15 @@ class UploadSessionService:
                 status_code=401,
             )
 
-        remaining = self._inactivity_remaining(session)
         warn_threshold = settings.upload_session_warn_seconds
         if remaining <= warn_threshold and session.status == "active":
             session.status = "warned"
             await self._sessions.update(session)
             await self._db.commit()
-            await ws_manager.emit(
-                token,
-                {
+            await publish_ws_event(
+                self._redis,
+                upload_session_token=token,
+                event={
                     "type": "session_warned",
                     "data": {"seconds_remaining": remaining},
                 },
@@ -252,10 +292,48 @@ class UploadSessionService:
             )
         return user
 
-    def _inactivity_remaining(self, session: UploadSession) -> int:
-        reference = session.last_upload_at or session.created_at
+    async def _inactivity_remaining(self, session: UploadSession) -> int:
+        ttl = await self._redis.ttl(self._qr_key(session.token))
+        if ttl >= 0:
+            return int(ttl)
+
+        reference = self._ensure_utc(session.last_upload_at or session.created_at)
         elapsed = (datetime.now(UTC) - reference).total_seconds()
-        return max(0, int(session.inactivity_secs - elapsed))
+        remaining = max(0, int(session.inactivity_secs - elapsed))
+        if remaining > 0 and session.status in self.ACTIVE_STATUSES:
+            await self._refresh_qr_cache(session, remaining)
+        return remaining
+
+    def _session_cache_payload(self, session: UploadSession) -> dict:
+        return {
+            "token": session.token,
+            "user_id": str(session.user_id),
+            "status": session.status,
+            "uploads_count": session.uploads_count,
+            "tax_year": session.tax_year,
+        }
+
+    async def _cache_session(self, session: UploadSession) -> None:
+        await self._redis.set(
+            self._qr_key(session.token),
+            json.dumps(self._session_cache_payload(session)),
+            ex=session.inactivity_secs,
+        )
+
+    async def _refresh_qr_cache(
+        self,
+        session: UploadSession,
+        ttl: int | None = None,
+    ) -> None:
+        expire = ttl if ttl is not None else session.inactivity_secs
+        await self._redis.set(
+            self._qr_key(session.token),
+            json.dumps(self._session_cache_payload(session)),
+            ex=expire,
+        )
+
+    async def _delete_qr_cache(self, token: str) -> None:
+        await self._redis.delete(self._qr_key(token))
 
     def _bind_mobile_device(self, session: UploadSession, user_agent: str) -> None:
         normalized = user_agent[:500] if user_agent else "unknown"

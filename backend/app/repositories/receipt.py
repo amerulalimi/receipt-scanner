@@ -37,15 +37,21 @@ class ReceiptRepository:
         self,
         receipt_id: uuid.UUID,
         user_id: uuid.UUID,
+        org_id: uuid.UUID | None,
         *,
         include_flags: bool = False,
         include_line_items: bool = False,
     ) -> Receipt | None:
-        stmt = select(Receipt).where(
+        conditions = [
             Receipt.id == receipt_id,
             Receipt.user_id == user_id,
             Receipt.deleted_at.is_(None),
-        )
+        ]
+        if org_id is None:
+            conditions.append(Receipt.org_id.is_(None))
+        else:
+            conditions.append(Receipt.org_id == org_id)
+        stmt = select(Receipt).where(*conditions)
         if include_flags:
             stmt = stmt.options(selectinload(Receipt.flags))
         if include_line_items:
@@ -63,10 +69,27 @@ class ReceiptRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_content_hash_for_user(
+        self,
+        content_hash: str,
+        user_id: uuid.UUID,
+    ) -> Receipt | None:
+        """Find original (non-duplicate) receipt by raw content SHA-256 for a user."""
+        result = await self._db.execute(
+            select(Receipt).where(
+                Receipt.user_id == user_id,
+                Receipt.image_hash == content_hash,
+                Receipt.deleted_at.is_(None),
+                Receipt.status != "duplicate",
+            ),
+        )
+        return result.scalar_one_or_none()
+
     async def list_for_user(
         self,
         *,
         user_id: uuid.UUID,
+        org_id: uuid.UUID | None,
         tax_year: int | None,
         category: str | None,
         status: str | None,
@@ -79,6 +102,10 @@ class ReceiptRepository:
             Receipt.user_id == user_id,
             Receipt.deleted_at.is_(None),
         ]
+        if org_id is None:
+            conditions.append(Receipt.org_id.is_(None))
+        else:
+            conditions.append(Receipt.org_id == org_id)
         if tax_year is not None:
             conditions.append(Receipt.tax_year == tax_year)
         if category is not None:
@@ -98,6 +125,7 @@ class ReceiptRepository:
         result = await self._db.execute(
             select(Receipt)
             .where(*conditions)
+            .options(selectinload(Receipt.flags))
             .order_by(ordering)
             .offset(offset)
             .limit(limit),
@@ -132,6 +160,7 @@ class ReceiptRepository:
         result = await self._db.execute(
             select(Receipt, User)
             .join(User, Receipt.user_id == User.id)
+            .options(selectinload(Receipt.flags))
             .where(*conditions)
             .order_by(desc(Receipt.created_at))
             .offset(offset)
@@ -162,17 +191,21 @@ class ReceiptRepository:
         self,
         *,
         user_id: uuid.UUID,
+        org_id: uuid.UUID | None,
         tax_year: int,
     ) -> dict[str, int]:
+        conditions = [
+            Receipt.user_id == user_id,
+            Receipt.tax_year == tax_year,
+            Receipt.deleted_at.is_(None),
+            Receipt.category.is_not(None),
+        ]
+        if org_id is None:
+            conditions.append(Receipt.org_id.is_(None))
+        else:
+            conditions.append(Receipt.org_id == org_id)
         result = await self._db.execute(
-            select(Receipt.category, func.count())
-            .where(
-                Receipt.user_id == user_id,
-                Receipt.tax_year == tax_year,
-                Receipt.deleted_at.is_(None),
-                Receipt.category.is_not(None),
-            )
-            .group_by(Receipt.category),
+            select(Receipt.category, func.count()).where(*conditions).group_by(Receipt.category),
         )
         return {category: int(count) for category, count in result.all() if category}
 
@@ -180,6 +213,7 @@ class ReceiptRepository:
         self,
         *,
         user_id: uuid.UUID,
+        org_id: uuid.UUID | None,
         tax_year: int,
         month_start: date,
         month_end: date,
@@ -197,6 +231,10 @@ class ReceiptRepository:
             effective_date >= month_start,
             effective_date <= month_end,
         ]
+        if org_id is None:
+            month_conditions.append(Receipt.org_id.is_(None))
+        else:
+            month_conditions.append(Receipt.org_id == org_id)
 
         total_result = await self._db.execute(
             select(func.coalesce(func.sum(Receipt.claimed_amount), 0)).where(*month_conditions),
@@ -215,11 +253,141 @@ class ReceiptRepository:
         }
         return total, by_category
 
+    async def count_uploads_this_month(
+        self,
+        *,
+        user_id: uuid.UUID,
+        org_id: uuid.UUID | None,
+        month_start: date,
+        month_end: date,
+    ) -> int:
+        conditions = [
+            Receipt.user_id == user_id,
+            Receipt.deleted_at.is_(None),
+            Receipt.status != "duplicate",
+            func.coalesce(
+                Receipt.receipt_date,
+                func.cast(Receipt.created_at, sa.Date),
+            )
+            >= month_start,
+            func.coalesce(
+                Receipt.receipt_date,
+                func.cast(Receipt.created_at, sa.Date),
+            )
+            <= month_end,
+        ]
+        if org_id is None:
+            conditions.append(Receipt.org_id.is_(None))
+        else:
+            conditions.append(Receipt.org_id == org_id)
+        result = await self._db.execute(
+            select(func.count()).select_from(Receipt).where(*conditions),
+        )
+        return int(result.scalar_one())
+
     async def create(self, receipt: Receipt) -> Receipt:
-        self._db.add(receipt)
+        if receipt.id is None:
+            receipt.id = uuid.uuid4()
+        self._db.sync_session.add(receipt)
         await self._db.flush()
         await self._db.refresh(receipt)
         return receipt
+
+    async def create_receipt(self, receipt: Receipt) -> Receipt:
+        return await self.create(receipt)
+
+    async def get_receipt(
+        self,
+        receipt_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        include_flags: bool = False,
+        include_line_items: bool = False,
+    ) -> Receipt | None:
+        return await self.get_by_id_for_user(
+            receipt_id,
+            user_id,
+            org_id=None,
+            include_flags=include_flags,
+            include_line_items=include_line_items,
+        )
+
+    async def get_receipts(
+        self,
+        user_id: uuid.UUID,
+        *,
+        tax_year: int | None = None,
+        category: str | None = None,
+        status: str | None = None,
+        page: int = 1,
+        limit: int = 20,
+        sort: str = "created_at:desc",
+    ) -> tuple[list[Receipt], int]:
+        sort_field, _, sort_order = sort.partition(":")
+        sort_field = sort_field or "created_at"
+        sort_order = sort_order or "desc"
+        return await self.list_for_user(
+            user_id=user_id,
+            org_id=None,
+            tax_year=tax_year,
+            category=category,
+            status=status,
+            page=page,
+            limit=limit,
+            sort_field=sort_field,
+            sort_order=sort_order,
+        )
+
+    async def update_receipt(self, receipt: Receipt) -> Receipt:
+        await self._db.flush()
+        await self._db.refresh(receipt)
+        return receipt
+
+    async def soft_delete_receipt(
+        self,
+        receipt_id: uuid.UUID,
+        user_id: uuid.UUID,
+        org_id: uuid.UUID | None,
+    ) -> bool:
+        receipt = await self.get_by_id_for_user(receipt_id, user_id, org_id)
+        if receipt is None:
+            return False
+        await self.soft_delete(receipt)
+        return True
+
+    async def create_flag(
+        self,
+        receipt_id: uuid.UUID,
+        flag_type: str,
+        message: str | None,
+    ) -> None:
+        from datetime import UTC, datetime
+
+        from app.models.receipt_flag import ReceiptFlag
+
+        flag = ReceiptFlag(
+            id=uuid.uuid4(),
+            receipt_id=receipt_id,
+            flag_type=flag_type,
+            message=message,
+            created_at=datetime.now(UTC),
+        )
+        self._db.sync_session.add(flag)
+        await self._db.flush()
+
+    async def get_receipt_with_details(
+        self,
+        receipt_id: uuid.UUID,
+        user_id: uuid.UUID,
+        org_id: uuid.UUID | None,
+    ) -> Receipt | None:
+        return await self.get_by_id_for_user(
+            receipt_id,
+            user_id,
+            org_id,
+            include_flags=True,
+            include_line_items=True,
+        )
 
     async def soft_delete(self, receipt: Receipt) -> Receipt:
         receipt.deleted_at = datetime.now(UTC)

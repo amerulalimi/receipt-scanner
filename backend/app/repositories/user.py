@@ -1,12 +1,15 @@
 import uuid
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 from sqlalchemy.orm import selectinload
 
 from app.models.receipt import Receipt
 from app.models.user import User
+from app.utils.db_period import get_dialect_name, period_expression
 
 
 class UserRepository:
@@ -51,14 +54,17 @@ class UserRepository:
         role: str,
         org_id: uuid.UUID | None = None,
         account_type: str = "individual",
+        org_employee_code: str | None = None,
     ) -> User:
         user = User(
+            id=uuid.uuid4(),
             email=email,
             password_hash=password_hash,
             full_name=full_name,
             role=role,
             org_id=org_id,
             account_type=account_type,
+            org_employee_code=org_employee_code,
         )
         self._db.add(user)
         await self._db.flush()
@@ -97,6 +103,7 @@ class UserRepository:
         user.org_id = None
         user.role = "individual"
         user.account_type = "individual"
+        user.org_employee_code = None
         await self._db.flush()
         await self._db.refresh(user)
         return user
@@ -149,7 +156,7 @@ class UserRepository:
                 .filter(Receipt.status == "pending")
                 .label("pending_count"),
             )
-            .where(Receipt.deleted_at.is_(None))
+            .where(Receipt.deleted_at.is_(None), Receipt.org_id == org_id)
             .group_by(Receipt.user_id)
             .subquery()
         )
@@ -184,6 +191,7 @@ class UserRepository:
                 func.coalesce(receipt_stats.c.total_claimed, 0),
                 func.coalesce(receipt_stats.c.pending_count, 0),
             )
+            .options(joinedload(User.claim_summaries))
             .outerjoin(receipt_stats, User.id == receipt_stats.c.user_id)
             .where(*conditions)
             .order_by(User.full_name.asc().nulls_last(), User.email.asc())
@@ -192,9 +200,77 @@ class UserRepository:
         )
         rows = [
             (row[0], int(row[1]), Decimal(str(row[2])), int(row[3]))
-            for row in result.all()
+            for row in result.unique().all()
         ]
         return rows, total
+
+    async def list_paginated(
+        self,
+        *,
+        search: str | None,
+        page: int,
+        limit: int,
+    ) -> tuple[list[User], int]:
+        conditions = []
+        if search:
+            pattern = f"%{search.strip()}%"
+            conditions.append(
+                or_(
+                    User.full_name.ilike(pattern),
+                    User.email.ilike(pattern),
+                ),
+            )
+
+        count_query = select(func.count()).select_from(User)
+        if conditions:
+            count_query = count_query.where(*conditions)
+        total = int((await self._db.execute(count_query)).scalar_one())
+
+        query = select(User).order_by(User.created_at.desc())
+        if conditions:
+            query = query.where(*conditions)
+
+        offset = (page - 1) * limit
+        result = await self._db.execute(query.offset(offset).limit(limit))
+        return list(result.scalars().all()), total
+
+    async def count_created_in_range(
+        self,
+        *,
+        from_date: date,
+        to_date: date,
+    ) -> int:
+        start = datetime.combine(from_date, datetime.min.time(), tzinfo=UTC)
+        end = datetime.combine(to_date, datetime.max.time(), tzinfo=UTC)
+        result = await self._db.execute(
+            select(func.count())
+            .select_from(User)
+            .where(User.created_at >= start, User.created_at <= end),
+        )
+        return int(result.scalar_one())
+
+    async def registration_counts_by_period(
+        self,
+        *,
+        granularity: str,
+        from_date: date,
+        to_date: date,
+    ) -> list[tuple[datetime, int]]:
+        start = datetime.combine(from_date, datetime.min.time(), tzinfo=UTC)
+        end = datetime.combine(to_date, datetime.max.time(), tzinfo=UTC)
+        dialect_name = await get_dialect_name(self._db)
+        period = period_expression(
+            User.created_at,
+            granularity,
+            dialect_name=dialect_name,
+        ).label("period")
+        result = await self._db.execute(
+            select(period, func.count())
+            .where(User.created_at >= start, User.created_at <= end)
+            .group_by(period)
+            .order_by(period),
+        )
+        return [(row[0], int(row[1])) for row in result.all()]
 
     async def mark_email_verified(self, user_id: uuid.UUID) -> User | None:
         user = await self.get_by_id(user_id)
@@ -209,16 +285,19 @@ class UserRepository:
         self,
         user_id: uuid.UUID,
         *,
-        full_name: str,
-        tax_year: int,
-        tax_bracket: Decimal | None,
+        full_name: str | None = None,
+        tax_year: int | None = None,
+        tax_bracket: Decimal | None = None,
     ) -> User | None:
         user = await self.get_by_id(user_id)
         if user is None:
             return None
-        user.full_name = full_name
-        user.tax_year = tax_year
-        user.tax_bracket = tax_bracket
+        if full_name is not None:
+            user.full_name = full_name
+        if tax_year is not None:
+            user.tax_year = tax_year
+        if tax_bracket is not None:
+            user.tax_bracket = tax_bracket
         await self._db.flush()
         await self._db.refresh(user)
         return user

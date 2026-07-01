@@ -18,7 +18,7 @@ ALLOWED_CONFIG_KEYS = frozenset(
 CONFIG_DEFAULTS: dict[str, str] = {
     "openrouter_vision_model": "google/gemini-2.5-flash",
     "receipt_processing_enabled": "true",
-    "auth_rate_limit_max": "5",
+    "auth_rate_limit_max": "0",
     "auth_rate_limit_window_seconds": "900",
     "audit_retention_days": "365",
     "receipt_retention_days": "90",

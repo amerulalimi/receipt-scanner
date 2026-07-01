@@ -2,16 +2,18 @@
 
 import {
   Bot,
+  Building2,
   KeyRound,
   LayoutDashboard,
   Receipt,
   Server,
   Shield,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { LogoutButton } from "@/components/auth/logout-button";
+import { AdminLogoutButton } from "@/components/admin/admin-logout-button";
 import {
   Sidebar,
   SidebarContent,
@@ -32,6 +34,18 @@ const NAV_ITEMS = [
     href: "/admin",
     icon: LayoutDashboard,
     exact: true,
+  },
+  {
+    title: "Users",
+    href: "/admin/users",
+    icon: Users,
+    exact: false,
+  },
+  {
+    title: "Organizations",
+    href: "/admin/organizations",
+    icon: Building2,
+    exact: false,
   },
   {
     title: "API Secrets",
@@ -123,7 +137,7 @@ export function AdminSidebar({ userEmail }: { userEmail: string }) {
           </SidebarMenuItem>
           <SidebarMenuItem>
             <div className="px-2 pb-2">
-              <LogoutButton className="w-full" />
+              <AdminLogoutButton className="w-full" />
             </div>
           </SidebarMenuItem>
         </SidebarMenu>

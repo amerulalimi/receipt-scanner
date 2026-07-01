@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -28,8 +29,20 @@ if TYPE_CHECKING:
 class ClaimSummary(Base):
     __tablename__ = "claim_summaries"
     __table_args__ = (
-        UniqueConstraint("user_id", "tax_year", "category", name="uq_claim_summaries_user_year_category"),
+        CheckConstraint(
+            "context_type IN ('individual', 'corporate')",
+            name="ck_claim_summaries_context_type",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "tax_year",
+            "category",
+            "context_type",
+            "org_id",
+            name="uq_claim_summaries_user_year_category_context",
+        ),
         Index("idx_summary_user_year", "user_id", "tax_year"),
+        Index("idx_summary_context", "user_id", "context_type", "org_id", "tax_year"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -41,6 +54,11 @@ class ClaimSummary(Base):
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    context_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="individual")
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organisations.id", ondelete="CASCADE"),
     )
     tax_year: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     category: Mapped[str] = mapped_column(String(50), nullable=False)

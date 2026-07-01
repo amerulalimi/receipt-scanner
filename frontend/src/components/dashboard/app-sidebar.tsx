@@ -1,12 +1,15 @@
 "use client";
 
 import {
+  BarChart3,
   Building2,
+  ClipboardCheck,
   FileText,
   HeartHandshake,
   LayoutDashboard,
   Receipt,
   Settings,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -68,6 +71,30 @@ const NAV_ITEMS = [
   },
 ] as const;
 
+const ORG_HR_NAV_ITEMS = [
+  {
+    key: "orgEmployees",
+    href: "/dashboard/org/employees",
+    icon: Users,
+  },
+  {
+    key: "orgPending",
+    href: "/dashboard/org/pending",
+    icon: ClipboardCheck,
+  },
+  {
+    key: "orgAnalytics",
+    href: "/dashboard/org/analytics",
+    icon: BarChart3,
+  },
+  {
+    key: "orgSettings",
+    href: "/dashboard/org/settings",
+    icon: Settings,
+    superadminOnly: true,
+  },
+] as const;
+
 function isNavActive(pathname: string, href: string, exact: boolean) {
   if (exact) {
     return pathname === href;
@@ -80,11 +107,15 @@ export function AppSidebar({
   userEmail,
   showOrgNav,
   showHouseholdNav,
+  showOrgHrNav,
+  isOrgSuperadmin,
 }: {
   userName: string;
   userEmail: string;
   showOrgNav: boolean;
   showHouseholdNav: boolean;
+  showOrgHrNav: boolean;
+  isOrgSuperadmin: boolean;
 }) {
   const pathname = usePathname();
   const t = useTranslations("nav");
@@ -139,6 +170,32 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {showOrgHrNav ? (
+          <SidebarGroup>
+            <SidebarGroupLabel>{t("orgHrSection")}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {ORG_HR_NAV_ITEMS.filter(
+                  (item) =>
+                    !("superadminOnly" in item && item.superadminOnly) ||
+                    isOrgSuperadmin,
+                ).map((item) => (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      isActive={isNavActive(pathname, item.href, false)}
+                      render={<Link href={item.href} />}
+                      tooltip={t(item.key)}
+                    >
+                      <item.icon />
+                      <span>{t(item.key)}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : null}
       </SidebarContent>
 
       <SidebarFooter>

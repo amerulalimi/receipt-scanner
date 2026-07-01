@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.receipt import Receipt
@@ -50,10 +50,13 @@ class OrgAnalyticsService:
         org_id: uuid.UUID,
         tax_year: int,
     ) -> list[OrgAnalyticsCategoryTrend]:
+        year = extract("year", Receipt.reviewed_at).label("year")
+        month = extract("month", Receipt.reviewed_at).label("month")
         result = await self._db.execute(
             select(
                 Receipt.category,
-                func.date_trunc("month", Receipt.reviewed_at).label("month"),
+                year,
+                month,
                 func.coalesce(func.sum(Receipt.claimed_amount), 0),
             )
             .where(
@@ -63,17 +66,27 @@ class OrgAnalyticsService:
                 Receipt.deleted_at.is_(None),
                 Receipt.reviewed_at.is_not(None),
             )
-            .group_by(Receipt.category, "month")
-            .order_by("month"),
+            .group_by(Receipt.category, year, month)
+            .order_by(year, month),
         )
-        return [
-            OrgAnalyticsCategoryTrend(
-                category=category or "unknown",
-                month=month.date() if month else None,
-                total_claimed=Decimal(str(total)),
+        trends: list[OrgAnalyticsCategoryTrend] = []
+        for category, trend_year, trend_month, total in result.all():
+            month_date = None
+            if trend_year is not None and trend_month is not None:
+                month_date = datetime(
+                    int(trend_year),
+                    int(trend_month),
+                    1,
+                    tzinfo=UTC,
+                ).date()
+            trends.append(
+                OrgAnalyticsCategoryTrend(
+                    category=category or "unknown",
+                    month=month_date,
+                    total_claimed=Decimal(str(total)),
+                ),
             )
-            for category, month, total in result.all()
-        ]
+        return trends
 
     async def _top_employees(
         self,

@@ -1,18 +1,19 @@
-import uuid
 from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CategoryClaimSummary(BaseModel):
     category: str
     be_seksyen: str | None
-    limit: Decimal
-    claimed: Decimal
+    limit_amount: Decimal
+    total_claimed: Decimal
     remaining: Decimal
     percentage: float
     receipt_count: int
     status: str
+    limit: Decimal = Field(description="Backward-compatible alias for limit_amount")
+    claimed: Decimal = Field(description="Backward-compatible alias for total_claimed")
 
 
 class ClaimSummaryData(BaseModel):
@@ -46,14 +47,31 @@ class ReadyToFileChecklistItem(BaseModel):
     text_en: str
 
 
+class ReadyToFileFilingItem(BaseModel):
+    be_field: str
+    be_seksyen: str
+    description: str
+    amount_to_enter: Decimal
+    receipt_count: int
+    status: str
+
+
 class ReadyToFileData(BaseModel):
     tax_year: int
     total_claimed: Decimal
+    total_relief: Decimal
     estimated_savings: Decimal
     tax_bracket: float
     pending_review_count: int
     fields: list[ReadyToFileField]
+    filing_checklist: list[ReadyToFileFilingItem]
     checklist: list[ReadyToFileChecklistItem]
+
+
+class CompletenessBreakdownItem(BaseModel):
+    criterion: str
+    achieved: bool
+    points: int
 
 
 class CompletenessScoreData(BaseModel):
@@ -65,3 +83,5 @@ class CompletenessScoreData(BaseModel):
     total_claimed: Decimal
     estimated_savings: Decimal
     milestone_message: str | None = None
+    next_action: str | None = None
+    breakdown: list[CompletenessBreakdownItem] = Field(default_factory=list)

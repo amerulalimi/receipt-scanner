@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.secret_keys import CONFIG_DEFAULTS
 from app.models.receipt import Receipt
+from app.models.upload_session import UploadSession
 from app.repositories.audit_log import AuditLogRepository
 from app.services.system_config import SystemConfigService
 
@@ -66,9 +67,28 @@ class RetentionService:
             )
             await self._db.flush()
 
+        session_cutoff = datetime.now(UTC) - timedelta(days=7)
+        session_result = await self._db.execute(
+            select(UploadSession).where(
+                UploadSession.status.in_(("expired", "closed")),
+                UploadSession.created_at < session_cutoff,
+            ),
+        )
+        stale_sessions = list(session_result.scalars().all())
+        sessions_deleted = len(stale_sessions)
+        if stale_sessions:
+            await self._db.execute(
+                delete(UploadSession).where(
+                    UploadSession.id.in_([item.id for item in stale_sessions]),
+                ),
+            )
+            await self._db.flush()
+
         return {
             "audit_logs_deleted": audit_deleted,
             "receipts_deleted": receipt_deleted,
+            "purged_receipts": receipt_deleted,
+            "purged_sessions": sessions_deleted,
             "audit_retention_days": audit_days,
             "receipt_retention_days": receipt_days,
         }

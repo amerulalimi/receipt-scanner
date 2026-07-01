@@ -7,12 +7,14 @@ import type {
   MobileCloseSessionResult,
   MobileKeepAliveResult,
   MobileUploadActionState,
+  MobileValidateResult,
 } from "@/actions/upload-session.types";
 import {
   closeUploadSessionWithFastApi,
   createUploadSessionWithFastApi,
   keepAliveUploadSessionWithFastApi,
   uploadViaSessionWithFastApi,
+  validateUploadSessionWithFastApi,
 } from "@/lib/api/upload-sessions";
 import { getActionMessage } from "@/lib/i18n/server-action-messages";
 import { parseReceiptUploadFormData } from "@/lib/validations/receipt";
@@ -74,7 +76,7 @@ export async function mobileUploadAction(
 
     return {
       success: true,
-      message: "Receipt is being processed.",
+      message: "✓ Resit diterima",
       jobId: body.data.job_id,
       inactivityRemaining: body.data.new_inactivity_remaining,
       uploadsCount: undefined,
@@ -128,6 +130,42 @@ export async function mobileCloseSessionAction(
     };
   } catch {
     return { error: "Unable to close session." };
+  }
+}
+
+export async function mobileValidateSessionAction(
+  token: string,
+): Promise<MobileValidateResult> {
+  const tokenResult = parseUploadSessionToken(token);
+  if (!tokenResult.success) {
+    return { error: "Token sesi tidak sah." };
+  }
+
+  try {
+    const { response, body } = await validateUploadSessionWithFastApi(
+      tokenResult.data,
+    );
+
+    if (!body.success || response.status === 401) {
+      return {
+        error:
+          body.success === false
+            ? body.message
+            : "Sesi tamat. Sila imbas QR baru.",
+      };
+    }
+
+    if (response.status >= 400 || !body.data) {
+      return { error: "Sesi muat naik tidak dijumpai." };
+    }
+
+    return {
+      valid: true,
+      uploadsSoFar: body.data.uploads_so_far,
+      inactivityRemaining: body.data.inactivity_remaining,
+    };
+  } catch {
+    return { error: "Tidak dapat menghubungi pelayan." };
   }
 }
 

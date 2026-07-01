@@ -55,6 +55,8 @@ class InviteToken(Base):
         nullable=False,
     )
     invited_email: Mapped[str | None] = mapped_column(String(255))
+    invited_full_name: Mapped[str | None] = mapped_column(String(255))
+    invited_employee_code: Mapped[str | None] = mapped_column(String(50))
     invited_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id"),

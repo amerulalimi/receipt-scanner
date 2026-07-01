@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const TAX_BRACKET_OPTIONS = [0, 1, 3, 8, 13, 21, 24, 26] as const;
+
 export const settingsProfileSchema = z.object({
   full_name: z
     .string()
@@ -7,7 +9,18 @@ export const settingsProfileSchema = z.object({
     .min(1, "Full name is required")
     .max(255, "Name is too long"),
   tax_year: z.number().int().min(2000).max(2100),
-  tax_bracket: z.union([z.number().min(0).max(100), z.null()]),
+  tax_bracket: z
+    .union([
+      z.literal(0),
+      z.literal(1),
+      z.literal(3),
+      z.literal(8),
+      z.literal(13),
+      z.literal(21),
+      z.literal(24),
+      z.literal(26),
+      z.null(),
+    ]),
 });
 
 export type SettingsProfileFormValues = z.infer<typeof settingsProfileSchema>;

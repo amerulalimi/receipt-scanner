@@ -23,6 +23,8 @@ import {
 import { formatRinggit } from "@/lib/receipt-format";
 import type { OrgEmployeeListData } from "@/lib/api/types";
 import { getOrgRoleLabel } from "@/components/org/org-overview-section";
+import { useTranslations } from "@/lib/i18n/use-translations";
+import { computeEmployeeStatus } from "@/lib/types/org";
 
 export function OrgEmployeesSection({
   employees,
@@ -31,6 +33,7 @@ export function OrgEmployeesSection({
   employees: OrgEmployeeListData;
   currentUserId: string;
 }) {
+  const t = useTranslations("org");
   const [state, submitAction, isPending] = useActionState(
     updateOrgEmployeeAction,
     initialOrgActionState,
@@ -82,7 +85,7 @@ export function OrgEmployeesSection({
     return (
       <Card>
         <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          No employees found. Invite new employees using the invitation form.
+          {t("employeesEmpty")}
         </CardContent>
       </Card>
     );
@@ -91,9 +94,9 @@ export function OrgEmployeesSection({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Employees</CardTitle>
+        <CardTitle className="text-base">{t("employeesTitle")}</CardTitle>
         <CardDescription>
-          {employees.total} employees in the organization.
+          {t("employeesCount", { total: employees.total })}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -134,12 +137,12 @@ export function OrgEmployeesSection({
               <div className="flex items-center gap-2">
                 <span
                   className={
-                    employee.is_active
+                    computeEmployeeStatus(employee) === "active"
                       ? "rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300"
                       : "rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
                   }
                 >
-                  {employee.is_active ? "Active" : "Inactive"}
+                  {employee.is_active ? t("statusActive") : t("statusInactive")}
                 </span>
                 {!isSelf && employee.role !== "superadmin" ? (
                   <>

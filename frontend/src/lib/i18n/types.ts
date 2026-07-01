@@ -17,6 +17,8 @@ export type Dictionary = {
   manualReceipt: DictionaryNamespace;
   orgExport: DictionaryNamespace;
   orgBulkImport: DictionaryNamespace;
+  orgNav: DictionaryNamespace;
+  join: DictionaryNamespace;
 };
 
 export type DictionaryNamespaceName = keyof Dictionary;

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import SuperadminDep, get_db
+from app.core.deps import PlatformAdminDep, get_db
 from app.schemas.common import ApiResponse
 from app.schemas.config_secrets import (
     SecretSettingMaskedRead,
@@ -9,7 +9,9 @@ from app.schemas.config_secrets import (
     SecretSettingsBulkUpdate,
 )
 from app.schemas.openrouter_health import OpenRouterHealthData
+from app.schemas.openrouter_models import OpenRouterModelsData
 from app.services.openrouter_health import check_openrouter_health
+from app.services.openrouter_models import list_openrouter_vision_models
 from app.services.secret_settings import SecretSettingsService
 
 router = APIRouter(prefix="/config/secrets", tags=["config-secrets"])
@@ -21,7 +23,7 @@ def _service(db: AsyncSession = Depends(get_db)) -> SecretSettingsService:
 
 @router.get("", response_model=ApiResponse[list[SecretSettingMaskedRead]])
 async def list_secrets(
-    _admin: SuperadminDep,
+    _admin: PlatformAdminDep,
     service: SecretSettingsService = Depends(_service),
 ) -> ApiResponse[list[SecretSettingMaskedRead]]:
     data = await service.list_masked()
@@ -30,7 +32,7 @@ async def list_secrets(
 
 @router.get("/openrouter/health", response_model=ApiResponse[OpenRouterHealthData])
 async def openrouter_health(
-    _admin: SuperadminDep,
+    _admin: PlatformAdminDep,
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[OpenRouterHealthData]:
     result = await check_openrouter_health(db)
@@ -47,11 +49,20 @@ async def openrouter_health(
     return ApiResponse(success=True, data=data, message=None)
 
 
+@router.get("/openrouter/models", response_model=ApiResponse[OpenRouterModelsData])
+async def openrouter_models(
+    _admin: PlatformAdminDep,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[OpenRouterModelsData]:
+    result = await list_openrouter_vision_models(db)
+    return ApiResponse(success=True, data=result.data, message=result.data.message)
+
+
 @router.put("/{key}", response_model=ApiResponse[SecretSettingMaskedRead])
 async def upsert_secret(
     key: str,
     payload: SecretSettingUpdate,
-    admin: SuperadminDep,
+    admin: PlatformAdminDep,
     service: SecretSettingsService = Depends(_service),
 ) -> ApiResponse[SecretSettingMaskedRead]:
     data = await service.set_secret(
@@ -69,7 +80,7 @@ async def upsert_secret(
 @router.patch("", response_model=ApiResponse[list[SecretSettingMaskedRead]])
 async def bulk_upsert_secrets(
     payload: SecretSettingsBulkUpdate,
-    admin: SuperadminDep,
+    admin: PlatformAdminDep,
     service: SecretSettingsService = Depends(_service),
 ) -> ApiResponse[list[SecretSettingMaskedRead]]:
     data = await service.bulk_set_secrets(

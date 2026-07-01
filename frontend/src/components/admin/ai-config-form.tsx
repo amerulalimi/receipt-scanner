@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { startTransition, useActionState, useEffect } from "react";
+import { startTransition, useActionState, useEffect, useMemo } from "react";
 import { Controller, useForm } from "react-hook-form";
 
 import { updateAiConfigAction } from "@/actions/admin-config";
@@ -16,11 +16,12 @@ import {
 } from "@/components/ui/card";
 import {
   Field,
+  FieldContent,
+  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -28,7 +29,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { SecretSettingMasked, SystemConfigItem } from "@/lib/api/types";
+import { Switch } from "@/components/ui/switch";
+import type {
+  OpenRouterModelOption,
+  SecretSettingMasked,
+  SystemConfigItem,
+} from "@/lib/api/types";
+import {
+  buildModelOptions,
+  findModelOption,
+  formatOpenRouterModelPricing,
+} from "@/lib/format/openrouter-pricing";
 import {
   aiConfigSchema,
   type AiConfigFormValues,
@@ -39,13 +50,30 @@ const initialState: AdminActionState = {};
 type AiConfigFormProps = {
   settings: SystemConfigItem[];
   secrets: SecretSettingMasked[];
+  models: OpenRouterModelOption[];
+  modelsMessage: string | null;
 };
 
 function getSettingValue(settings: SystemConfigItem[], key: string) {
   return settings.find((item) => item.key === key)?.value ?? "";
 }
 
-export function AiConfigForm({ settings, secrets }: AiConfigFormProps) {
+function ModelSelectValue({ model }: { model: OpenRouterModelOption | undefined }) {
+  if (!model) {
+    return <SelectValue placeholder="Select a vision model" />;
+  }
+
+  return (
+    <span className="truncate font-medium">{model.name}</span>
+  );
+}
+
+export function AiConfigForm({
+  settings,
+  secrets,
+  models,
+  modelsMessage,
+}: AiConfigFormProps) {
   const openrouterConfigured = secrets.some(
     (item) => item.key === "openrouter_api_key" && item.is_configured,
   );
@@ -55,19 +83,33 @@ export function AiConfigForm({ settings, secrets }: AiConfigFormProps) {
     initialState,
   );
 
+  const defaultVisionModel = getSettingValue(settings, "openrouter_vision_model");
+
   const form = useForm<AiConfigFormValues>({
     resolver: zodResolver(aiConfigSchema),
     defaultValues: {
-      openrouter_vision_model: getSettingValue(
-        settings,
-        "openrouter_vision_model",
-      ),
+      openrouter_vision_model: defaultVisionModel,
       receipt_processing_enabled: getSettingValue(
         settings,
         "receipt_processing_enabled",
       ) as "true" | "false",
     },
   });
+
+  const selectedModelId = form.watch("openrouter_vision_model");
+
+  const modelOptions = useMemo(
+    () => buildModelOptions(models, selectedModelId),
+    [models, selectedModelId],
+  );
+
+  const selectedModel = useMemo(
+    () => findModelOption(modelOptions, selectedModelId),
+    [modelOptions, selectedModelId],
+  );
+
+  const modelsUnavailable =
+    openrouterConfigured && modelOptions.length === 0;
 
   useEffect(() => {
     if (!state.fieldErrors) {
@@ -119,6 +161,15 @@ export function AiConfigForm({ settings, secrets }: AiConfigFormProps) {
           </p>
         ) : null}
 
+        {modelsUnavailable && modelsMessage ? (
+          <p
+            role="status"
+            className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100"
+          >
+            {modelsMessage}
+          </p>
+        ) : null}
+
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
           {state.error ? (
             <p
@@ -147,11 +198,34 @@ export function AiConfigForm({ settings, secrets }: AiConfigFormProps) {
                   <FieldLabel htmlFor="openrouter_vision_model">
                     Model Vision (OpenRouter)
                   </FieldLabel>
-                  <Input
-                    {...field}
-                    id="openrouter_vision_model"
-                    placeholder="google/gemini-2.5-flash"
-                  />
+                  <Select
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    disabled={!openrouterConfigured || modelOptions.length === 0}
+                  >
+                    <SelectTrigger
+                      id="openrouter_vision_model"
+                      className="w-full"
+                    >
+                      <ModelSelectValue model={selectedModel} />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-80">
+                      {modelOptions.map((model) => (
+                        <SelectItem
+                          key={model.id}
+                          value={model.id}
+                          className="items-start py-2 whitespace-normal"
+                        >
+                          <span className="flex min-w-0 flex-col gap-0.5">
+                            <span className="font-medium">{model.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {formatOpenRouterModelPricing(model)}
+                            </span>
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <FieldError errors={[fieldState.error]} />
                 </Field>
               )}
@@ -161,20 +235,29 @@ export function AiConfigForm({ settings, secrets }: AiConfigFormProps) {
               name="receipt_processing_enabled"
               control={form.control}
               render={({ field, fieldState }) => (
-                <Field data-invalid={fieldState.invalid}>
-                  <FieldLabel htmlFor="receipt_processing_enabled">
-                    Receipt processing
-                  </FieldLabel>
-                  <Select value={field.value} onValueChange={field.onChange}>
-                    <SelectTrigger id="receipt_processing_enabled">
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="true">Enabled</SelectItem>
-                      <SelectItem value="false">Disabled</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FieldError errors={[fieldState.error]} />
+                <Field
+                  orientation="responsive"
+                  data-invalid={fieldState.invalid}
+                  className="justify-between"
+                >
+                  <FieldContent>
+                    <FieldLabel htmlFor="receipt_processing_enabled">
+                      Receipt processing
+                    </FieldLabel>
+                    <FieldDescription>
+                      Enable automatic AI classification when receipts are
+                      uploaded.
+                    </FieldDescription>
+                    <FieldError errors={[fieldState.error]} />
+                  </FieldContent>
+                  <Switch
+                    id="receipt_processing_enabled"
+                    checked={field.value === "true"}
+                    onCheckedChange={(checked) =>
+                      field.onChange(checked ? "true" : "false")
+                    }
+                    aria-invalid={fieldState.invalid}
+                  />
                 </Field>
               )}
             />

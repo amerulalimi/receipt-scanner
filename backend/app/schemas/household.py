@@ -60,10 +60,14 @@ class ClaimSuggestionData(BaseModel):
     receipt_id: uuid.UUID
     category: str
     suggested_user_id: uuid.UUID
+    suggestion: str = "self"
     reason_my: str
     reason_en: str
+    reason: str | None = None
     user_remaining: Decimal
     spouse_remaining: Decimal
+    my_bracket: float | None = None
+    spouse_bracket: float | None = None
 
 
 class ReceiptReassignRequest(BaseModel):

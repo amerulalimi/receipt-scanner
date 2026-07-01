@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import SuperadminDep, get_db
+from app.core.deps import PlatformAdminDep, get_db
 from app.schemas.common import ApiResponse
 from app.schemas.config_settings import (
     SystemConfigBulkUpdate,
@@ -19,7 +19,7 @@ def _service(db: AsyncSession = Depends(get_db)) -> SystemConfigService:
 
 @router.get("", response_model=ApiResponse[list[SystemConfigRead]])
 async def list_settings(
-    _admin: SuperadminDep,
+    _admin: PlatformAdminDep,
     service: SystemConfigService = Depends(_service),
 ) -> ApiResponse[list[SystemConfigRead]]:
     data = await service.list_all()
@@ -30,7 +30,7 @@ async def list_settings(
 async def upsert_setting(
     key: str,
     payload: SystemConfigUpdate,
-    admin: SuperadminDep,
+    admin: PlatformAdminDep,
     service: SystemConfigService = Depends(_service),
 ) -> ApiResponse[SystemConfigRead]:
     data = await service.set(
@@ -48,7 +48,7 @@ async def upsert_setting(
 @router.patch("", response_model=ApiResponse[list[SystemConfigRead]])
 async def bulk_upsert_settings(
     payload: SystemConfigBulkUpdate,
-    admin: SuperadminDep,
+    admin: PlatformAdminDep,
     service: SystemConfigService = Depends(_service),
 ) -> ApiResponse[list[SystemConfigRead]]:
     data = await service.bulk_set(

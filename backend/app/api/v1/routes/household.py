@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUserDep, OrgAdminDep, get_db
+from app.core.deps import CurrentSessionDep, CurrentUserDep, OrgAdminDep, get_db
 from app.schemas.common import ApiResponse
 from app.schemas.household import (
     ClaimSuggestionData,
@@ -25,9 +25,11 @@ def _household_service(db: AsyncSession = Depends(get_db)) -> HouseholdService:
 @router.get("", response_model=ApiResponse[HouseholdOverviewData])
 async def get_household_overview(
     current_user: CurrentUserDep,
+    current_session: CurrentSessionDep,
+    tax_year: int | None = Query(default=None, ge=2000, le=2100),
     service: HouseholdService = Depends(_household_service),
 ) -> ApiResponse[HouseholdOverviewData]:
-    data = await service.get_overview(current_user)
+    data = await service.get_overview(current_user, session=current_session, tax_year=tax_year)
     return ApiResponse(success=True, data=data, message=None)
 
 
@@ -35,9 +37,10 @@ async def get_household_overview(
 async def request_spouse_link(
     payload: SpouseLinkRequest,
     current_user: CurrentUserDep,
+    current_session: CurrentSessionDep,
     service: HouseholdService = Depends(_household_service),
 ) -> ApiResponse[dict]:
-    link = await service.request_spouse_link(current_user, payload)
+    link = await service.request_spouse_link(current_user, payload, session=current_session)
     return ApiResponse(
         success=True,
         data={"link_id": str(link.id), "status": link.status},
@@ -50,9 +53,10 @@ async def respond_spouse_link(
     link_id: uuid.UUID,
     payload: SpouseLinkRespondRequest,
     current_user: CurrentUserDep,
+    current_session: CurrentSessionDep,
     service: HouseholdService = Depends(_household_service),
 ) -> ApiResponse[dict]:
-    link = await service.respond_to_link(current_user, link_id, payload)
+    link = await service.respond_to_link(current_user, link_id, payload, session=current_session)
     return ApiResponse(
         success=True,
         data={"link_id": str(link.id), "status": link.status},
@@ -64,9 +68,10 @@ async def respond_spouse_link(
 async def dissolve_spouse_link(
     link_id: uuid.UUID,
     current_user: CurrentUserDep,
+    current_session: CurrentSessionDep,
     service: HouseholdService = Depends(_household_service),
 ) -> ApiResponse[None]:
-    await service.dissolve_link(current_user, link_id)
+    await service.dissolve_link(current_user, link_id, session=current_session)
     return ApiResponse(success=True, data=None, message="Pautan pasangan diputuskan.")
 
 
@@ -75,12 +80,14 @@ async def reassign_receipt_to_spouse(
     receipt_id: uuid.UUID,
     payload: ReceiptReassignRequest,
     current_user: CurrentUserDep,
+    current_session: CurrentSessionDep,
     service: HouseholdService = Depends(_household_service),
 ) -> ApiResponse[None]:
     await service.reassign_receipt(
         current_user,
         receipt_id,
         target_user_id=payload.target_user_id,
+        session=current_session,
     )
     return ApiResponse(success=True, data=None, message="Resit dipindahkan.")
 
@@ -92,7 +99,8 @@ async def reassign_receipt_to_spouse(
 async def get_claim_suggestion(
     receipt_id: uuid.UUID,
     current_user: CurrentUserDep,
+    current_session: CurrentSessionDep,
     service: HouseholdService = Depends(_household_service),
 ) -> ApiResponse[ClaimSuggestionData]:
-    data = await service.suggest_claim_owner(current_user, receipt_id)
+    data = await service.suggest_claim_owner(current_user, receipt_id, session=current_session)
     return ApiResponse(success=True, data=data, message=None)

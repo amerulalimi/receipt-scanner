@@ -113,6 +113,8 @@ class InviteValidateResponseData(BaseModel):
     org_name: str | None = None
     role: str | None = None
     invited_email: str | None = None
+    invited_full_name: str | None = None
+    invited_employee_code: str | None = None
     expires_at: datetime | None = None
 
 

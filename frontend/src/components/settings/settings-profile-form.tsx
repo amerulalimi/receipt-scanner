@@ -17,9 +17,17 @@ import {
 } from "@/components/ui/card";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { MeData } from "@/lib/api/types";
 import {
   settingsProfileSchema,
+  TAX_BRACKET_OPTIONS,
   type SettingsProfileFormValues,
 } from "@/lib/validations/settings";
 import { useTranslations } from "@/lib/i18n/use-translations";
@@ -124,21 +132,23 @@ export function SettingsProfileForm({ user }: { user: MeData }) {
                     <FieldLabel htmlFor="settings-tax-bracket">
                       {t("taxBracket")}
                     </FieldLabel>
-                    <Input
-                      id="settings-tax-bracket"
-                      type="number"
-                      min={0}
-                      max={100}
-                      step="0.01"
-                      value={field.value ?? ""}
-                      onChange={(event) =>
-                        field.onChange(
-                          event.target.value === ""
-                            ? null
-                            : Number(event.target.value),
-                        )
+                    <Select
+                      value={field.value === null ? "" : String(field.value)}
+                      onValueChange={(value) =>
+                        field.onChange(value === "" ? null : Number(value))
                       }
-                    />
+                    >
+                      <SelectTrigger id="settings-tax-bracket" className="w-full">
+                        <SelectValue placeholder={t("taxBracketPlaceholder")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TAX_BRACKET_OPTIONS.map((bracket) => (
+                          <SelectItem key={bracket} value={String(bracket)}>
+                            {bracket}%
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FieldError errors={[fieldState.error]} />
                   </Field>
                 )}

@@ -30,6 +30,10 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { useTranslations } from "@/lib/i18n/use-translations";
+
+type InviteTab = "email" | "link" | "csv";
 
 export function OrgInviteSection({
   emailDomain,
@@ -38,6 +42,8 @@ export function OrgInviteSection({
   emailDomain: string;
   isSuperadmin: boolean;
 }) {
+  const t = useTranslations("org");
+  const [activeTab, setActiveTab] = useState<InviteTab>("email");
   const [employeeState, employeeAction, employeePending] = useActionState(
     inviteEmployeesAction,
     initialOrgActionState,
@@ -103,66 +109,99 @@ export function OrgInviteSection({
   const latestInviteUrl =
     employeeState.inviteUrl ?? hrState.inviteUrl ?? null;
 
+  const tabs: Array<{ id: InviteTab; label: string }> = [
+    { id: "email", label: t("inviteTabEmail") },
+    { id: "link", label: t("inviteTabLink") },
+    { id: "csv", label: t("inviteTabCsv") },
+  ];
+
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Invite Employees</CardTitle>
+          <CardTitle className="text-base">{t("inviteEmployee")}</CardTitle>
           <CardDescription>
             Employee emails must use the @{emailDomain} domain.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Open invitation link</p>
-            <p className="text-sm text-muted-foreground">
-              Generate a link to share with new employees.
-            </p>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={employeePending}
-              onClick={createLinkInvite}
-            >
-              {employeePending ? "Generating…" : "Generate invitation link"}
-            </Button>
+          <div className="flex flex-wrap gap-2">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                  activeTab === tab.id
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:text-foreground",
+                )}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          <form
-            className="space-y-3 border-t pt-4"
-            onSubmit={employeeForm.handleSubmit(submitEmailInvites)}
-          >
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="employee-emails">
-                  Invite by email
-                </FieldLabel>
-                <textarea
-                  id="employee-emails"
-                  className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  placeholder={`jane@${emailDomain}\njohn@${emailDomain}`}
-                  {...employeeForm.register("emails")}
-                />
-                <FieldDescription>
-                  One email per line, or separate with commas.
-                </FieldDescription>
-                <FieldError
-                  errors={[employeeForm.formState.errors.emails]}
-                />
-              </Field>
-              {employeeState.error ? (
-                <p className="text-sm text-destructive">{employeeState.error}</p>
-              ) : null}
-              {employeeState.success ? (
-                <p className="text-sm text-emerald-600">
-                  {employeeState.message}
-                </p>
-              ) : null}
-              <Button type="submit" disabled={employeePending}>
-                {employeePending ? "Sending…" : "Send invitations"}
+          {activeTab === "link" ? (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Generate a link to share with new employees.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={employeePending}
+                onClick={createLinkInvite}
+              >
+                {employeePending ? "Generating…" : "Generate invitation link"}
               </Button>
-            </FieldGroup>
-          </form>
+            </div>
+          ) : null}
+
+          {activeTab === "email" ? (
+            <form
+              className="space-y-3"
+              onSubmit={employeeForm.handleSubmit(submitEmailInvites)}
+            >
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="employee-emails">
+                    Invite by email
+                  </FieldLabel>
+                  <textarea
+                    id="employee-emails"
+                    className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                    placeholder={`jane@${emailDomain}\njohn@${emailDomain}`}
+                    {...employeeForm.register("emails")}
+                  />
+                  <FieldDescription>
+                    One email per line, or separate with commas.
+                  </FieldDescription>
+                  <FieldError
+                    errors={[employeeForm.formState.errors.emails]}
+                  />
+                </Field>
+                {employeeState.error ? (
+                  <p className="text-sm text-destructive">{employeeState.error}</p>
+                ) : null}
+                {employeeState.success ? (
+                  <p className="text-sm text-emerald-600">
+                    {employeeState.message}
+                  </p>
+                ) : null}
+                <Button type="submit" disabled={employeePending}>
+                  {employeePending ? "Sending…" : "Send invitations"}
+                </Button>
+              </FieldGroup>
+            </form>
+          ) : null}
+
+          {activeTab === "csv" ? (
+            <p className="text-sm text-muted-foreground">
+              {t("inviteCsvPlaceholder")}
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -210,8 +249,7 @@ export function OrgInviteSection({
           <CardHeader>
             <CardTitle className="text-base">Invitation Link</CardTitle>
             <CardDescription>
-              Copy this link and share it with employees (dev: also in the
-              backend log).
+              Copy this link and share it with employees.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center">
