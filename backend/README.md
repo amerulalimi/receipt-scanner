@@ -6,8 +6,7 @@
 # 1. Start PostgreSQL + Redis
 docker compose up -d
 
-# 2. Copy env and install deps
-cp .env.example .env
+# 2. Install deps
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 pip install -r requirements.txt

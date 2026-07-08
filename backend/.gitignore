@@ -1,6 +1,5 @@
-# Environment (never commit secrets or env templates)
+# Environment (never commit)
 .env
 .env.*
 .env.local
 .env.*.local
-!.env.example

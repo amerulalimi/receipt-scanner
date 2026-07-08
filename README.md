@@ -32,38 +32,7 @@ For non-Docker local development:
 
 This is the easiest way to run the full app locally.
 
-### 1. Create env files
-
-Copy the provided examples:
-
-```powershell
-Copy-Item backend/.env.example backend/.env
-Copy-Item frontend/.env.example frontend/.env
-```
-
-Or on macOS/Linux:
-
-```bash
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-```
-
-### 2. Review the minimum values
-
-The defaults are enough to boot the app locally with Docker. You only need to change values if you want real integrations.
-
-Most important files:
-
-- `backend/.env`
-- `frontend/.env`
-
-Important notes:
-
-- `backend/.env` uses `localhost` for local development outside containers.
-- In Docker, `docker-compose.yml` overrides service-to-service URLs automatically.
-- `OPENROUTER_API_KEY` is optional for booting the stack, but AI receipt features will be limited without it.
-
-### 3. Build and start everything
+### 1. Build and start everything
 
 ```powershell
 docker compose up --build
@@ -75,7 +44,7 @@ Run detached if you prefer:
 docker compose up --build -d
 ```
 
-### 4. Open the app
+### 2. Open the app
 
 - Frontend: [http://localhost:3000](http://localhost:3000)
 - Backend API: [http://localhost:8000](http://localhost:8000)
@@ -115,7 +84,7 @@ Notes:
 
 - Built from `frontend/Dockerfile`
 - Uses a multi-stage Next.js standalone build
-- Receives required build-time env values from `docker-compose.yml`
+- Receives required build-time values from `docker-compose.yml`
 
 ### Backend
 
@@ -155,31 +124,6 @@ npm install
 npm run dev
 ```
 
-## Environment Files
-
-Example env files are now included here:
-
-- `backend/.env.example`
-- `frontend/.env.example`
-
-Do not commit real `.env` files.
-
-Key frontend variables:
-
-- `FASTAPI_URL`: server-side URL used by Next.js to talk to FastAPI
-- `NEXT_PUBLIC_API_URL`: browser-visible backend URL
-- `NEXT_PUBLIC_APP_URL`: public frontend URL
-
-Key backend variables:
-
-- `DATABASE_URL`
-- `REDIS_URL`
-- `FRONTEND_URL`
-- `CORS_ORIGINS`
-- `SESSION_SECRET`
-- `OPENROUTER_API_KEY`
-- `STORAGE_BACKEND`
-
 ## Common Docker Troubleshooting
 
 ### Port already in use
@@ -191,8 +135,8 @@ If a port is already taken, stop the existing process or change the port mapping
 Check:
 
 - `backend` container is healthy
-- `FASTAPI_URL` is still `http://backend:8000` inside Docker
-- `NEXT_PUBLIC_API_URL` points to `http://localhost:8000` for browser access
+- Docker Compose frontend `FASTAPI_URL` is still `http://backend:8000`
+- Docker Compose frontend public API URL points to `http://localhost:8000`
 
 ### Need a clean rebuild
 

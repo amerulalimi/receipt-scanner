@@ -1,14 +1,16 @@
 services:
   postgres:
     image: postgres:15
-    env_file:
-      - ./backend/.env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: resit
     ports:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d resit"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -25,12 +27,21 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
-    env_file:
-      - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:Senario%40123@postgres:5432/resit
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/resit
       REDIS_URL: redis://redis:6379/0
+      FRONTEND_URL: http://localhost:3000
+      CORS_ORIGINS: http://localhost:3000
       RUN_IN_PROCESS_WORKER: "false"
+      ENVIRONMENT: development
+      DEBUG: "true"
+      SESSION_SECRET: changeme-min-32-chars-for-dev-only!!
+      SESSION_COOKIE_NAME: resit_sess
+      SESSION_TTL_SECONDS: "28800"
+      ADMIN_SESSION_COOKIE_NAME: admin_resit_sess
+      ADMIN_SESSION_TTL_SECONDS: "28800"
+      STORAGE_BACKEND: local
+      LOCAL_STORAGE_PATH: ./storage/receipts
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,12 +64,21 @@ services:
   worker:
     build: ./backend
     command: python -m app.worker
-    env_file:
-      - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:Senario%40123@postgres:5432/resit
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/resit
       REDIS_URL: redis://redis:6379/0
+      FRONTEND_URL: http://localhost:3000
+      CORS_ORIGINS: http://localhost:3000
       RUN_IN_PROCESS_WORKER: "false"
+      ENVIRONMENT: development
+      DEBUG: "true"
+      SESSION_SECRET: changeme-min-32-chars-for-dev-only!!
+      SESSION_COOKIE_NAME: resit_sess
+      SESSION_TTL_SECONDS: "28800"
+      ADMIN_SESSION_COOKIE_NAME: admin_resit_sess
+      ADMIN_SESSION_TTL_SECONDS: "28800"
+      STORAGE_BACKEND: local
+      LOCAL_STORAGE_PATH: ./storage/receipts
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,18 +94,20 @@ services:
         FASTAPI_URL: http://backend:8000
         NEXT_PUBLIC_API_URL: http://localhost:8000
         NEXT_PUBLIC_APP_URL: http://localhost:3000
-        SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-resit_sess}
-        SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-28800}
-        ADMIN_SESSION_COOKIE_NAME: ${ADMIN_SESSION_COOKIE_NAME:-admin_resit_sess}
-        ADMIN_SESSION_TTL_SECONDS: ${ADMIN_SESSION_TTL_SECONDS:-28800}
+        SESSION_COOKIE_NAME: resit_sess
+        SESSION_TTL_SECONDS: "28800"
+        ADMIN_SESSION_COOKIE_NAME: admin_resit_sess
+        ADMIN_SESSION_TTL_SECONDS: "28800"
     ports:
       - "3000:3000"
-    env_file:
-      - ./frontend/.env
     environment:
       FASTAPI_URL: http://backend:8000
       NEXT_PUBLIC_API_URL: http://localhost:8000
       NEXT_PUBLIC_APP_URL: http://localhost:3000
+      SESSION_COOKIE_NAME: resit_sess
+      SESSION_TTL_SECONDS: "28800"
+      ADMIN_SESSION_COOKIE_NAME: admin_resit_sess
+      ADMIN_SESSION_TTL_SECONDS: "28800"
     depends_on:
       backend:
         condition: service_healthy
