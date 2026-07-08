@@ -60,8 +60,10 @@ export function getYearEndReminderInfo(
   };
 }
 
-export function formatDeadlineDate(date: Date, _locale?: Locale): string {
-  return new Intl.DateTimeFormat("en-MY", {
+export function formatDeadlineDate(date: Date, locale?: Locale): string {
+  const resolvedLocale = locale === "en" ? "en-MY" : "ms-MY";
+
+  return new Intl.DateTimeFormat(resolvedLocale, {
     day: "numeric",
     month: "long",
     year: "numeric",

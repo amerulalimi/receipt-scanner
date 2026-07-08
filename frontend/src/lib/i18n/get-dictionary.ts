@@ -33,8 +33,10 @@ export async function getDictionary(locale?: Locale): Promise<Dictionary> {
   } as Dictionary;
 }
 
-export function getCurrencyFormatter(_locale?: Locale): Intl.NumberFormat {
-  return new Intl.NumberFormat("ms-MY", {
+export function getCurrencyFormatter(locale?: Locale): Intl.NumberFormat {
+  const resolvedLocale = locale === "en" ? "en-MY" : "ms-MY";
+
+  return new Intl.NumberFormat(resolvedLocale, {
     style: "currency",
     currency: "MYR",
     minimumFractionDigits: 2,

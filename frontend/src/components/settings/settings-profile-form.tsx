@@ -34,6 +34,8 @@ import { useTranslations } from "@/lib/i18n/use-translations";
 
 export function SettingsProfileForm({ user }: { user: MeData }) {
   const t = useTranslations("settings");
+  const initialTaxBracket =
+    TAX_BRACKET_OPTIONS.find((bracket) => bracket === user.tax_bracket) ?? null;
   const [state, submitAction, isPending] = useActionState(
     updateSettingsProfileAction,
     initialSettingsActionState,
@@ -44,7 +46,7 @@ export function SettingsProfileForm({ user }: { user: MeData }) {
     defaultValues: {
       full_name: user.full_name ?? "",
       tax_year: user.tax_year,
-      tax_bracket: user.tax_bracket,
+      tax_bracket: initialTaxBracket,
     },
   });
 

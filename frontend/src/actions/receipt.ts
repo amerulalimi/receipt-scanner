@@ -53,7 +53,7 @@ export async function uploadReceiptAction(
   }
 
   try {
-    const { body } = await uploadReceiptWithFastApi(
+    const body = await uploadReceiptWithFastApi(
       parsed.data.files,
       parsed.data.tax_year,
     );
@@ -72,6 +72,7 @@ export async function uploadReceiptAction(
     return {
       success: true,
       message: body.data.message,
+      jobIds: body.data.job_ids,
       uploadErrors: uploadErrors?.length ? uploadErrors : undefined,
     };
   } catch {
@@ -127,7 +128,7 @@ export async function updateReceiptAction(
       }
 
       revalidateReceiptPaths();
-      return { success: true };
+      return { success: true, receipt: body.data };
     } catch {
       return {
         error: await getActionMessage("errors", "sessionExpired"),
@@ -162,7 +163,7 @@ export async function updateReceiptAction(
     }
 
     revalidateReceiptPaths();
-    return { success: true };
+    return { success: true, receipt: body.data };
   } catch {
     return {
       error: await getActionMessage("errors", "sessionExpired"),

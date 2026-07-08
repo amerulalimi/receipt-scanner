@@ -1,24 +1,20 @@
 services:
   postgres:
     image: postgres:15
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-resitmy}
-      POSTGRES_USER: ${POSTGRES_USER:-resit}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-resit_dev}
+    env_file:
+      - ./backend/.env
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-resit} -d ${POSTGRES_DB:-resitmy}"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -30,9 +26,9 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - .env
+      - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-resit}:${POSTGRES_PASSWORD:-resit_dev}@postgres:5432/${POSTGRES_DB:-resitmy}
+      DATABASE_URL: postgresql+asyncpg://postgres:Senario%40123@postgres:5432/resit
       REDIS_URL: redis://redis:6379/0
       RUN_IN_PROCESS_WORKER: "false"
     depends_on:
@@ -42,14 +38,25 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/storage:/app/storage
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   worker:
     build: ./backend
     command: python -m app.worker
     env_file:
-      - .env
+      - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-resit}:${POSTGRES_PASSWORD:-resit_dev}@postgres:5432/${POSTGRES_DB:-resitmy}
+      DATABASE_URL: postgresql+asyncpg://postgres:Senario%40123@postgres:5432/resit
       REDIS_URL: redis://redis:6379/0
       RUN_IN_PROCESS_WORKER: "false"
     depends_on:
@@ -61,17 +68,27 @@ services:
       - ./backend/storage:/app/storage
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        FASTAPI_URL: http://backend:8000
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_APP_URL: http://localhost:3000
+        SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-resit_sess}
+        SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-28800}
+        ADMIN_SESSION_COOKIE_NAME: ${ADMIN_SESSION_COOKIE_NAME:-admin_resit_sess}
+        ADMIN_SESSION_TTL_SECONDS: ${ADMIN_SESSION_TTL_SECONDS:-28800}
     ports:
       - "3000:3000"
     env_file:
-      - .env
+      - ./frontend/.env
     environment:
       FASTAPI_URL: http://backend:8000
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-      NEXT_PUBLIC_APP_URL: ${FRONTEND_URL:-http://localhost:3000}
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres_data:

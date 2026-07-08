@@ -38,6 +38,7 @@ export async function ReadyToFileContent({
   categoryLabels,
   locale,
 }: ReadyToFileContentProps) {
+  void categoryLabels;
   const dictionary = await getDictionary(locale);
   const t = createServerTranslator(dictionary);
   const formatRinggit = getCurrencyFormatter(locale);

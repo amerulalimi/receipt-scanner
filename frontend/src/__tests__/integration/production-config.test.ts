@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 jest.mock("@/env", () => ({
   env: {
     NODE_ENV: "test",
@@ -53,9 +56,6 @@ describe("production config", () => {
   });
 
   it("security headers are expected in requests", () => {
-    const fs = require("node:fs") as typeof import("node:fs");
-    const path = require("node:path") as typeof import("node:path");
-
     const configSource = fs.readFileSync(
       path.join(__dirname, "../../../next.config.ts"),
       "utf8",

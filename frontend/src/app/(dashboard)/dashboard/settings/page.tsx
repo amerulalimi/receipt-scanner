@@ -1,12 +1,5 @@
 import { DashboardError } from "@/components/dashboard/dashboard-error";
 import { EmailVerificationBanner } from "@/components/dashboard/email-verification-banner";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { ForwardingEmailCard } from "@/components/settings/forwarding-email-card";
 import { NotificationPreferencesForm } from "@/components/settings/notification-preferences-form";
 import { SettingsProfileForm } from "@/components/settings/settings-profile-form";

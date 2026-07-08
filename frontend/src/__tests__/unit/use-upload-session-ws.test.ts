@@ -10,7 +10,8 @@ class MockWebSocket {
   onclose: (() => void) | null = null;
   sent: string[] = [];
 
-  constructor(_url: string) {
+  constructor(url: string) {
+    void url;
     MockWebSocket.instances.push(this);
     queueMicrotask(() => this.onopen?.());
   }

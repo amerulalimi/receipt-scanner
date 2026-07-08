@@ -174,6 +174,9 @@ export async function getMeAction(): Promise<AuthActionState<MeData>> {
 
   try {
     const body = await fetchMeWithFastApi(cookie);
+    if (!body.success) {
+      return { success: false, error: body.message, errorCode: body.code };
+    }
     return { success: true, data: body.data };
   } catch (err) {
     if (err instanceof ApiClientError) {
@@ -211,6 +214,9 @@ export async function updateProfileAction(
 
   try {
     const body = await updateMeWithFastApi(cookie, parsed.data);
+    if (!body.success) {
+      return { success: false, error: body.message, errorCode: body.code };
+    }
     revalidatePath("/dashboard/settings");
     return { success: true, data: body.data };
   } catch (err) {
