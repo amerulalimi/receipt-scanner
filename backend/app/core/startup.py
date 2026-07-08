@@ -109,7 +109,7 @@ async def run_startup_checks(engine: AsyncEngine, redis: Redis) -> None:
             logger.warning("Redis not reachable at startup")
 
 
-def run_migrations() -> None:
+def _run_migrations_sync() -> None:
     if settings.environment == "test":
         return
 
@@ -125,6 +125,10 @@ def run_migrations() -> None:
         if settings.environment == "production":
             raise SystemExit(1) from None
         logger.warning("Continuing without migrations in %s", settings.environment)
+
+
+async def run_migrations() -> None:
+    await asyncio.to_thread(_run_migrations_sync)
 
 
 async def touch_worker_heartbeat(redis: Redis) -> None:

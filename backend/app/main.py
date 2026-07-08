@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
 
 
 
-    run_migrations()
+    await run_migrations()
 
     ensure_upload_root()
 
